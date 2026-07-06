@@ -12,10 +12,38 @@ import uvicorn
 
 
 def _selftest() -> int:
-    """Validasi library berat yang diimpor lazy benar-benar hidup di build beku.
-    Dipakai saat packaging/CI: `sensatype-backend --selftest`. Tak menyentuh data apa pun."""
-    # fontmake + rantai kompilasinya (ufo2ft, feaLib, dll.)
-    from fontmake.font_project import FontProject  # noqa: F401
+    """Validasi build beku dengan MENG-COMPILE font nyata (bukan sekadar impor) — agar
+    submodul yang diimpor lazy saat kompilasi (mis. openstep_plist.util, cu2qu/qu2cu, feature
+    writer ufo2ft) ketahuan bila hilang. Dipakai saat packaging/CI. Tak menyentuh data apa pun."""
+    import tempfile
+    from pathlib import Path
+
+    import ufoLib2
+    from fontmake.font_project import FontProject
+
+    # UFO minimal 1 glyph, lalu compile OTF+TTF (persis seperti engine memakainya).
+    font = ufoLib2.Font()
+    font.info.familyName = "Selftest"
+    font.info.styleName = "Regular"
+    font.info.unitsPerEm = 1000
+    font.info.ascender = 800
+    font.info.descender = -200
+    font.info.capHeight = 700
+    font.info.xHeight = 500
+    font.newGlyph(".notdef").width = 600
+    sp = font.newGlyph("space"); sp.width = 250; sp.unicode = 0x20
+    a = font.newGlyph("A"); a.width = 600; a.unicode = 0x41
+    pen = a.getPen()
+    pen.moveTo((50, 0)); pen.lineTo((550, 0)); pen.lineTo((300, 700)); pen.closePath()
+
+    with tempfile.TemporaryDirectory() as td:
+        ufo_path = Path(td) / "selftest.ufo"
+        font.save(ufo_path)
+        FontProject().run_from_ufos([str(ufo_path)], output=("otf", "ttf"), output_dir=td)
+        outs = list(Path(td).rglob("*.otf")) + list(Path(td).rglob("*.ttf"))
+        if not outs:
+            raise RuntimeError("fontmake tidak menghasilkan OTF/TTF")
+
     # PyMuPDF: buat PDF kosong 1 halaman → memicu MuPDF native lib.
     import fitz
     doc = fitz.open()
@@ -24,10 +52,11 @@ def _selftest() -> int:
     doc.close()
     # skia-pathops native (operasi boolean sederhana).
     import pathops
-    pen = pathops.Path()
-    pen.moveTo(0, 0); pen.lineTo(10, 0); pen.lineTo(10, 10); pen.close()
-    pathops.simplify(pen)
-    print(f"SELFTEST OK — fontmake+ufo2ft, PyMuPDF({n}p), skia-pathops semua hidup di build beku")
+    pen2 = pathops.Path()
+    pen2.moveTo(0, 0); pen2.lineTo(10, 0); pen2.lineTo(10, 10); pen2.close()
+    pathops.simplify(pen2)
+
+    print(f"SELFTEST OK — compile fontmake OTF+TTF ({len(outs)} berkas), PyMuPDF({n}p), skia-pathops")
     return 0
 
 

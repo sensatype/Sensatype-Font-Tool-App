@@ -8,9 +8,9 @@ from PyInstaller.utils.hooks import collect_all
 
 _libs = [
     "fontmake", "ufo2ft", "fontTools", "ufoLib2", "picosvg", "pathops",
-    "fontMath", "booleanOperations", "glyphsLib", "fitz", "unicodedata2",
-    "uvicorn", "fastapi", "starlette", "keyring", "httpx", "anyio",
-    "multipart", "pydantic", "pydantic_core",
+    "fontMath", "booleanOperations", "glyphsLib", "openstep_plist", "fitz",
+    "unicodedata2", "uvicorn", "fastapi", "starlette", "keyring", "httpx",
+    "anyio", "multipart", "pydantic", "pydantic_core",
 ]
 
 datas, binaries, hiddenimports = [], [], []
