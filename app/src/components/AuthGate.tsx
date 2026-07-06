@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Loader2, LogIn, ExternalLink, ShieldX } from "lucide-react";
 import { authApi, focusApp, isElectron, openLoginUrl, type Session } from "../auth";
 import { setUnauthorizedHandler } from "../api";
@@ -26,6 +26,7 @@ type Phase =
 // login Sensatype di route /auth/callback (Vite melayani index.html utk path ini via SPA fallback).
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [phase, setPhase] = useState<Phase>({ k: "loading" });
+  const cbHandled = useRef(false); // StrictMode (dev) me-mount efek 2× — code OAuth hanya boleh ditukar SEKALI
 
   const logout = useCallback(async () => {
     try { await authApi.logout(); } catch { /* tetap keluar walau server tak terjangkau */ }
@@ -69,7 +70,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     // 401 dari request mana pun → balik ke layar login (token dicabut / kedaluwarsa).
     setUnauthorizedHandler(() => setPhase({ k: "anon" }));
 
-    if (window.location.pathname === "/auth/callback") {
+    if (window.location.pathname === "/auth/callback" && !cbHandled.current) {
+      cbHandled.current = true;
       const u = new URL(window.location.href);
       const code = u.searchParams.get("code");
       const state = u.searchParams.get("state");

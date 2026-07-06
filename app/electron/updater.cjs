@@ -53,6 +53,8 @@ function ghLatestRelease() {
 }
 
 // Unduh (ikuti redirect GitHub→S3), tulis ke `dest`, laporkan progres ke bar Dock.
+// PENTING: koneksi putus di tengah body muncul di `res` (bukan `req`), dan tanpa timeout
+// unduhan macet membuat promise tak pernah selesai → jendela progres nyangkut selamanya.
 function download(url, dest, onProgress, redirects = 0) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { headers: { "User-Agent": "SensatypeFontTool" } }, (res) => {
@@ -65,11 +67,14 @@ function download(url, dest, onProgress, redirects = 0) {
       let got = 0;
       const file = fs.createWriteStream(dest);
       res.on("data", (d) => { got += d.length; if (total && onProgress) onProgress(got / total); });
+      res.on("error", (e) => { file.destroy(); reject(e); });
       res.pipe(file);
       file.on("finish", () => file.close(() => resolve(dest)));
       file.on("error", reject);
     });
     req.on("error", reject);
+    // idle timeout 60 dtk: tak ada byte masuk selama itu → putus & gagal (bukan diam selamanya)
+    req.setTimeout(60000, () => req.destroy(new Error("unduhan macet (timeout)")));
   });
 }
 
@@ -130,8 +135,9 @@ async function macUpdate(manual) {
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const assets = rel.assets || [];
   const asset = assets.find((a) => a.name.endsWith(`${arch}.dmg`)) || assets.find((a) => a.name.endsWith(".dmg"));
-  const exe = process.execPath;                                  // …/Nama.app/Contents/MacOS/Nama
-  const appBundle = exe.slice(0, exe.indexOf(".app") + 4);       // …/Nama.app
+  // execPath SELALU …/Nama.app/Contents/MacOS/Nama → naik 3 level. (JANGAN indexOf(".app"):
+  // path induk yang mengandung ".app" — mis. /dev.apps/ — akan terpotong salah → rm -rf path keliru.)
+  const appBundle = path.resolve(process.execPath, "..", "..", "..");
   let writable = false;
   try { fs.accessSync(path.dirname(appBundle), fs.constants.W_OK); writable = appBundle.endsWith(".app"); } catch { /* tak bisa tulis */ }
 
@@ -167,7 +173,8 @@ async function macUpdate(manual) {
   closeProgress();
   safeBar(win, -1);
 
-  // Skrip installer: tunggu app keluar → mount → ganti bundle → hapus karantina → relaunch.
+  // Skrip installer: tunggu app keluar → mount → salin ke .new DULU (baru swap; kalau salin
+  // gagal, app lama tetap utuh — jangan rm sebelum salinan terbukti sukses) → karantina → relaunch.
   const script = `#!/bin/bash
 DMG=${shq(dmgPath)}
 APP=${shq(appBundle)}
@@ -177,9 +184,14 @@ MNT=$(mktemp -d /tmp/sensatype-mnt.XXXXXX)
 hdiutil attach "$DMG" -nobrowse -noverify -mountpoint "$MNT" >/dev/null 2>&1
 SRC=$(ls -d "$MNT"/*.app 2>/dev/null | head -1)
 if [ -n "$SRC" ]; then
-  rm -rf "$APP"
-  /usr/bin/ditto "$SRC" "$APP"
-  /usr/bin/xattr -dr com.apple.quarantine "$APP" >/dev/null 2>&1 || true
+  rm -rf "$APP.new"
+  if /usr/bin/ditto "$SRC" "$APP.new"; then
+    rm -rf "$APP"
+    mv "$APP.new" "$APP"
+    /usr/bin/xattr -dr com.apple.quarantine "$APP" >/dev/null 2>&1 || true
+  else
+    rm -rf "$APP.new"
+  fi
 fi
 hdiutil detach "$MNT" >/dev/null 2>&1 || true
 rm -f "$DMG"

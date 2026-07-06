@@ -40,20 +40,23 @@ export function ImportWizard({ onImported }: { onImported: (s: ProjectState) => 
     } catch (e: any) { setErr(String(e.message ?? e)); }
     finally { setBusy(false); }
   }
+  // aksi staging gagal → tampilkan errornya (tanpa catch, promise rejection senyap & UI diam saja)
+  const showErr = (e: unknown) => setErr(String((e as Error).message ?? e));
   async function op(o: string, ids: number[]) {
     setBusy(true);
     try { setStaging(await api.stagingOp(o, ids)); setSel(new Set()); }
+    catch (e) { showErr(e); }
     finally { setBusy(false); }
   }
   async function commitGuides(guides: { y: number; type: string; linked?: boolean }[]) {
-    setStaging(await api.setGuides(guides));
+    try { setStaging(await api.setGuides(guides)); } catch (e) { showErr(e); }
   }
   async function moveShapes(ids: number[], dx: number, dy: number) {
     if (!ids.length || (!dx && !dy)) return;
-    setStaging(await api.stagingMove(ids, dx, dy));
+    try { setStaging(await api.stagingMove(ids, dx, dy)); } catch (e) { showErr(e); }
   }
-  async function undo() { setSel(new Set()); setStaging(await api.stagingUndo()); }
-  async function redo() { setSel(new Set()); setStaging(await api.stagingRedo()); }
+  async function undo() { setSel(new Set()); try { setStaging(await api.stagingUndo()); } catch (e) { showErr(e); } }
+  async function redo() { setSel(new Set()); try { setStaging(await api.stagingRedo()); } catch (e) { showErr(e); } }
   useEffect(() => {
     if (step !== "clean") return;
     function onKey(e: KeyboardEvent) {

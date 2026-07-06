@@ -18,12 +18,13 @@ if [ "$(uname -m)" != "arm64" ]; then
 fi
 
 echo "→ Mencari rilis terbaru…"
-URL=$(curl -fsSL "$API" | grep -oE 'https://[^"]*arm64\.dmg' | head -1)
+# `|| true`: dengan set -e, grep tanpa hasil akan mematikan skrip SEBELUM pesan error ramah di bawah
+URL=$(curl -fsSL "$API" | grep -oE 'https://[^"]*arm64\.dmg' | head -1 || true)
 if [ -z "${URL:-}" ]; then
   echo "✗ Tidak menemukan installer .dmg (arm64) di rilis terbaru." >&2
   exit 1
 fi
-VER=$(printf '%s' "$URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+VER=$(printf '%s' "$URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 echo "→ Versi ${VER:-?}"
 
 # Tujuan pasang: /Applications bila bisa ditulis, jika tidak ~/Applications (tanpa sudo).

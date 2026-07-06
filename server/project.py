@@ -740,9 +740,11 @@ class Project:
         g1, g2 = self._kern_groups(font)
         lg, rg = g1.get(left), g2.get(right)
         kern = font.kerning
-        # resolusi UFO §9.6: (L,R) > (grpL,R) > (L,grpR) > (grpL,grpR)
+        # resolusi UFO §9.6 (urutan ufo2ft): (L,R) > (L,grpR) > (grpL,R) > (grpL,grpR)
+        # — glyph di sisi PERTAMA lebih spesifik; salah urutan → nilai yang dilaporkan UI beda
+        # dgn yang benar-benar dipakai font hasil kompilasi.
         value = 0
-        for k in [(left, right)] + ([(lg, right)] if lg else []) + ([(left, rg)] if rg else []) + ([(lg, rg)] if lg and rg else []):
+        for k in [(left, right)] + ([(left, rg)] if rg else []) + ([(lg, right)] if lg else []) + ([(lg, rg)] if lg and rg else []):
             if k in kern:
                 value = int(kern[k]); break
         # classValue = nilai pada kunci LEVEL-KELAS yang SAMA dgn yang ditulis set_kerning(scope='class'):
@@ -785,14 +787,24 @@ class Project:
         pairs = kerning_mod.auto_kern_pairs(font, names, upm=upm)
         g1, g2 = self._kern_groups(font)
         written = skipped = 0
+        done = set()
         for (L, R), v in pairs.items():
+            lg, rg = g1.get(L), g2.get(R)
+            # tulis LEVEL KELAS bila glyph punya grup (konsisten set_kerning scope='class');
+            # kalau ditulis per-glyph, pasangan itu jadi exception yang MEMBAYANGI edit kelas berikutnya.
+            key = (lg or L, rg or R)
+            if key in done:
+                continue  # anggota grup lain sudah menulis kunci kelas yang sama (nilai ~identik)
+            done.add(key)
             if only_empty:
-                lg, rg = g1.get(L), g2.get(R)
                 keys = [(L, R)] + ([(lg, R)] if lg else []) + ([(L, rg)] if rg else []) + ([(lg, rg)] if lg and rg else [])
                 if any(k in font.kerning for k in keys):
                     skipped += 1
                     continue
-            font.kerning[(L, R)] = v
+            elif key != (L, R):
+                # mode TIMPA: buang exception per-glyph lama agar nilai kelas baru benar-benar terlihat
+                font.kerning.pop((L, R), None)
+            font.kerning[key] = v
             written += 1
         if written:
             font.save(self.ufo_path, overwrite=True)
@@ -879,7 +891,8 @@ class Project:
                 # exception-ke-0 klasik: bila level KELAS ≠ 0, tulis (glyph,glyph)=0 eksplisit —
                 # kalau kuncinya di-pop, nilai kelas muncul lagi (nilai "tak mau nol").
                 cls = 0
-                for k in ([(lg, right)] if lg else []) + ([(left, rg)] if rg else []) + ([(lg, rg)] if lg and rg else []):
+                # urutan §9.6 yang sama dgn get_kern: (L,grpR) > (grpL,R) > (grpL,grpR)
+                for k in ([(left, rg)] if rg else []) + ([(lg, right)] if lg else []) + ([(lg, rg)] if lg and rg else []):
                     if k in font.kerning:
                         cls = int(font.kerning[k])
                         break

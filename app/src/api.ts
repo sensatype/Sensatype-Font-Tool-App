@@ -198,7 +198,9 @@ export const api = {
     if (!r.ok) throw new Error((await r.text()) || r.statusText);
     const cd = r.headers.get("Content-Disposition") || "";
     const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
-    const filename = m ? decodeURIComponent(m[1]) : "font.zip";
+    // decode bisa melempar URIError utk nama polos ber-'%' (mis. 100%Sans) → fallback ke mentah
+    let filename = "font.zip";
+    if (m) { try { filename = decodeURIComponent(m[1]); } catch { filename = m[1]; } }
     return { blob: await r.blob(), filename };
   },
 };

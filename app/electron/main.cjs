@@ -165,9 +165,11 @@ function createWindow() {
     return { action: "deny" };
   });
   // Cegah renderer bernavigasi keluar dari UI-nya sendiri (anti-hijack).
+  // Bandingkan ORIGIN via new URL — prefix string bisa dikelabui (mis. http://127.0.0.1:8000.evil.com).
   mainWindow.webContents.on("will-navigate", (e, url) => {
-    const base = RENDERER_URL || BACKEND_ORIGIN;
-    if (!url.startsWith(base)) { e.preventDefault(); if (/^https?:/.test(url)) shell.openExternal(url); }
+    let ok = false;
+    try { ok = new URL(url).origin === new URL(APP_URL).origin; } catch { /* url tak valid */ }
+    if (!ok) { e.preventDefault(); if (/^https?:/.test(url)) shell.openExternal(url); }
   });
   startAppLoad();
 }

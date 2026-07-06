@@ -116,8 +116,11 @@ def smart_pair(font, left, right, *, upm, step=10, deadband=3, clamp_frac=0.18, 
 
 
 def auto_kern_pairs(font, names, *, upm, step=10, deadband=6, clamp_frac=0.18, target=None):
-    """Kern optikal untuk SEMUA pasangan berurutan dari `names` (glyph-level). Profil di-precompute
-    SEKALI (bukan per pasangan) → cepat. Return {(L,R): int} hanya utk |v|>=deadband. TIDAK menulis."""
+    """Kern optikal untuk SEMUA pasangan berurutan dari `names`. Return {(L,R): int} hanya utk
+    |v|>=deadband. TIDAK menulis. Tabel margin per glyph DIPRAKOMPUTASI pada grid-y bersama
+    (kelipatan `step`) → tiap pasangan tinggal lookup, bukan scan segmen O(n²) (yang membuat
+    font berkontur rumit makan waktu bermenit-menit & menahan lock tulis)."""
+    import math
     data = {}
     for n in names:
         if n in font:
@@ -128,14 +131,39 @@ def auto_kern_pairs(font, names, *, upm, step=10, deadband=6, clamp_frac=0.18, t
     if target is None:
         target = _reference_target(font, upm, step)
     clamp = upm * clamp_frac
+    # tabel margin per glyph: y (grid bersama) -> (minX, maxX)
+    tables = {}
+    for n in ns:
+        c, b = data[n]
+        tab = {}
+        y = math.ceil(b[1] / step) * step
+        while y <= b[3]:
+            mn, mx = htls._margins_at(c, y)
+            if mn is not None:
+                tab[y] = (mn, mx)
+            y += step
+        tables[n] = (tab, b)
     out = {}
     for L in ns:
-        Lc, Ladv = data[L][0], font[L].width
+        Ltab, Lb = tables[L]
+        Ladv = font[L].width
         for R in ns:
-            avg = _avg_gap(Lc, Ladv, data[R][0], step)
-            if avg is None:
+            Rtab, Rb = tables[R]
+            y0 = max(Lb[1], Rb[1])
+            y1 = min(Lb[3], Rb[3])
+            if y1 <= y0:
                 continue
-            k = round(target - avg)
+            gaps = []
+            y = math.ceil(y0 / step) * step
+            while y <= y1:
+                l = Ltab.get(y)
+                r = Rtab.get(y)
+                if l and r:
+                    gaps.append((Ladv - l[1]) + r[0])
+                y += step
+            if not gaps:
+                continue
+            k = round(target - sum(gaps) / len(gaps))
             if abs(k) < deadband:
                 continue
             out[(L, R)] = int(max(-clamp, min(clamp, k)))

@@ -107,22 +107,27 @@ export function GlyphEditor({
   const [refData, setRefData] = useState<{ path: string; advance: number } | null>(null);
   // KERNING mode: pasangan glyph aktif + partner, nilai kern (em)
   const [kernPartner, setKernPartner] = useState("");
+  const [kernSelf, setKernSelf] = useState(name ?? ""); // glyph AKTIF pasangan — bisa diganti langsung di toolbar (tanpa klik panel kiri)
   const [kernSide, setKernSide] = useState<"left" | "right">("left"); // sisi glyph AKTIF dlm pasangan
   const [kernVal, setKernVal] = useState(0);
   const [kernInfo, setKernInfo] = useState<KernInfo | null>(null); // hasil resolusi (grup/exception)
   const [kernScope, setKernScope] = useState<"all" | "class" | "pair" | "smart">("class"); // Semuanya(tracking)/Kelas/Pasangan/Smart
   const [smartBusy, setSmartBusy] = useState(false); // sedang menghitung saran smart kern
   const [autoBusy, setAutoBusy] = useState(false); // sedang menjalankan auto-kern seluruh font
+  const [autoMenu, setAutoMenu] = useState(false); // menu pilihan auto-kern (isi kosong / timpa semua)
   // Nilai kerning/tracking kini DITAHAN dulu (pratinjau) → baru ditulis saat tombol "Terapkan"
   // diklik. kernDirty = ada nilai tertahan yang belum ditetapkan.
   const [kernDirty, setKernDirty] = useState(false);
   const kernDirtyRef = useRef(kernDirty); kernDirtyRef.current = kernDirty;
+  const kernScopeRef = useRef(kernScope); kernScopeRef.current = kernScope; // utk .then fetch (scope bisa berganti selagi fetch jalan)
+  const smartSkipRef = useRef(false); // one-shot: bump fontV berikut berasal dari apply smart kita → jangan hitung ulang saran
   const kernInfoRef = useRef<KernInfo | null>(null); kernInfoRef.current = kernInfo;
   const pendingKern = useRef<number | null>(null); // nilai kern yg BARU kita tulis → refetch echo tak menimpa nilai live
   const [trackVal, setTrackVal] = useState(tracking); // nilai tracking live (disinkron dari prop)
   useEffect(() => { setTrackVal(tracking); }, [tracking]);
   const [kernBusy, setKernBusy] = useState(false); // proses perluas group
   const [partnerData, setPartnerData] = useState<{ path: string; advance: number } | null>(null);
+  const [selfData, setSelfData] = useState<{ path: string; advance: number } | null>(null); // data glyph aktif pasangan bila ≠ glyph terpilih
   // TEXT mode: proofing teks bebas
   const [proofText, setProofText] = useState("");
   const [proofSize, setProofSize] = useState(96);
@@ -219,68 +224,101 @@ export function GlyphEditor({
     const prefer = d.category === "uppercase" ? ["A", "V", "T", "O"] : ["o", "a", "n", "v"];
     setKernPartner(prefer.find((x) => glyphNames.includes(x) && x !== name) ?? glyphNames.find((x) => x !== name) ?? glyphNames[0]);
   }, [d, glyphNames, kernPartner, name]);
+  // input pasangan menerima NAMA GLYPH atau SATU KARAKTER (dipetakan via charToName) → cepat diketik
+  const resolveGlyph = (s: string) => (glyphNames.includes(s) ? s : (charToName[s] ?? s));
+  const kernPartnerName = resolveGlyph(kernPartner);
+  const kernSelfName = resolveGlyph(kernSelf);
   // ambil path+advance partner — hanya bila nama VALID (ketik parsial di dropdown ≠ fetch 404 beruntun)
   useEffect(() => {
-    if (!kernPartner || !glyphNames.includes(kernPartner)) { setPartnerData(null); return; }
+    if (!kernPartnerName || !glyphNames.includes(kernPartnerName)) { setPartnerData(null); return; }
     let cancel = false;
-    api.glyph(kernPartner).then((g) => { if (!cancel) setPartnerData({ path: g.path, advance: g.advance }); }).catch(() => { if (!cancel) setPartnerData(null); });
+    api.glyph(kernPartnerName).then((g) => { if (!cancel) setPartnerData({ path: g.path, advance: g.advance }); }).catch(() => { if (!cancel) setPartnerData(null); });
     return () => { cancel = true; };
-  }, [kernPartner, glyphNames]);
+  }, [kernPartnerName, glyphNames]);
+  // glyph AKTIF pasangan bisa diganti di toolbar → ambil datanya bila ≠ glyph terpilih di panel kiri
+  useEffect(() => {
+    if (!kernSelfName || kernSelfName === name || !glyphNames.includes(kernSelfName)) { setSelfData(null); return; }
+    let cancel = false;
+    api.glyph(kernSelfName).then((g) => { if (!cancel) setSelfData({ path: g.path, advance: g.advance }); }).catch(() => { if (!cancel) setSelfData(null); });
+    return () => { cancel = true; };
+  }, [kernSelfName, name, glyphNames]);
   // nama kiri/kanan pasangan (tergantung sisi glyph aktif)
-  const kernLeft = kernSide === "left" ? name : kernPartner;
-  const kernRight = kernSide === "left" ? kernPartner : name;
+  const kernLeft = kernSide === "left" ? kernSelfName : kernPartnerName;
+  const kernRight = kernSide === "left" ? kernPartnerName : kernSelfName;
   // nilai kern utk scope aktif (pasangan → pairValue; class/smart → classValue sbg baseline)
   const kernScoped = (k: KernInfo | null, scope: "all" | "class" | "pair" | "smart") =>
     !k ? 0 : (scope === "pair" ? (k.pairValue ?? 0) : (k.classValue ?? 0));
-  useEffect(() => { pendingKern.current = null; setKernDirty(false); }, [kernLeft, kernRight]); // pasangan berganti → reset guard echo + buang nilai tertahan
+  // pasangan berganti → reset guard echo + buang nilai tertahan. Ref di-sync SINKRON:
+  // efek smart di bawah berjalan pada commit yang sama & membaca ref ini — kalau hanya setState,
+  // ref masih berisi dirty lama → computeSmart terlewat → saran smart tak pernah dihitung.
+  useEffect(() => { pendingKern.current = null; smartSkipRef.current = false; kernDirtyRef.current = false; setKernDirty(false); }, [kernLeft, kernRight]);
   // ambil info kern saat pasangan berubah — HANYA di mode Kerning (hemat: commit node/spasi
   // di mode lain tak perlu memicu fetch kern; masuk mode Kerning → fetch segar via dep `mode`)
   useEffect(() => {
     if (mode !== "kerning") return;
     if (!kernLeft || !kernRight || !glyphNames.includes(kernLeft) || !glyphNames.includes(kernRight)) { setKernInfo(null); setKernVal(0); return; }
     let cancel = false;
-    api.getKerning(kernLeft, kernRight).then((k) => { if (!cancel) { setKernInfo(k); const sv = kernScoped(k, kernScope);
-      if (sv !== pendingKern.current && !kernDirtyRef.current) setKernVal(sv); } }) // nilai tertahan JANGAN ditimpa refetch
+    api.getKerning(kernLeft, kernRight).then((k) => { if (!cancel) { setKernInfo(k); const sv = kernScoped(k, kernScopeRef.current);
+      if (sv !== pendingKern.current && !kernDirtyRef.current) setKernVal(sv); } }) // nilai tertahan JANGAN ditimpa refetch; scope dibaca dari ref (bisa berganti selagi fetch jalan)
       .catch(() => { if (!cancel) { setKernInfo(null); setKernVal(0); } });
     return () => { cancel = true; };
   }, [mode, kernLeft, kernRight, fontV]); // eslint-disable-line react-hooks/exhaustive-deps  // fontV → refetch saat kern berubah
-  // ganti scope → tampilkan nilai scope itu (nilai tertahan scope lama dibuang). Smart: dihitung terpisah.
-  useEffect(() => { if (kernScope === "smart") return; setKernVal(kernScoped(kernInfoRef.current, kernScope)); setKernDirty(false); }, [kernScope]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ganti scope → nilai tertahan scope lama SELALU dibuang (sync ref: efek smart di bawah berjalan
+  // pada commit yang sama & membacanya — tanpa ini, draft kelas/pasangan nyangkut sbg "saran Smart" palsu).
+  useEffect(() => {
+    kernDirtyRef.current = false; setKernDirty(false);
+    if (kernScope === "smart") return; // saran dihitung efek smart di bawah
+    setKernVal(kernScoped(kernInfoRef.current, kernScope));
+  }, [kernScope]); // eslint-disable-line react-hooks/exhaustive-deps
   // SMART KERNING: hitung saran optikal (sadar-bentuk) dari outline pasangan → tahan sbg nilai
-  // yang siap "Terapkan". Bentuk lurus/bulat/menjorok/diagonal menyesuaikan sendiri.
+  // yang siap "Terapkan". Baseline diambil SEGAR (paralel) — kernInfoRef bisa masih milik pasangan lama.
   const computeSmart = useCallback(async () => {
     if (!kernLeft || !kernRight || !glyphNames.includes(kernLeft) || !glyphNames.includes(kernRight)) return;
     setSmartBusy(true);
     try {
-      const r = await api.smartKern(kernLeft, kernRight);
-      const base = kernInfoRef.current?.classValue ?? 0;
+      const [r, k] = await Promise.all([api.smartKern(kernLeft, kernRight), api.getKerning(kernLeft, kernRight)]);
+      setKernInfo(k); kernInfoRef.current = k;
       setKernVal(r.value);
-      setKernDirty(r.value !== base); // beda dari tersimpan → tawarkan "Terapkan"
+      const dirty = r.value !== (k.classValue ?? 0);
+      kernDirtyRef.current = dirty; setKernDirty(dirty); // beda dari tersimpan → tawarkan "Terapkan"
     } catch { /* abaikan */ }
     finally { setSmartBusy(false); }
   }, [kernLeft, kernRight, glyphNames]);
-  useEffect(() => { if (mode === "kerning" && kernScope === "smart" && !kernDirtyRef.current) computeSmart(); }, [kernScope, mode, computeSmart, fontV]);
+  useEffect(() => {
+    if (mode !== "kerning" || kernScope !== "smart" || kernDirtyRef.current) return;
+    if (smartSkipRef.current) { smartSkipRef.current = false; return; } // bump fontV dari apply kita sendiri → jangan timpa nilai yang baru diterapkan dgn saran baru
+    computeSmart();
+  }, [kernScope, mode, computeSmart, fontV]);
   // AUTO-KERN SELURUH FONT: hitung + terapkan kern optikal utk semua pasangan huruf/angka.
-  // AMAN: hanya MENGISI pasangan yang belum punya kerning (yang sudah diatur tak diubah).
-  async function runAutoKernAll() {
+  // Dua mode (pilihan user): onlyEmpty=true → hanya MENGISI yang belum diatur (aman);
+  // onlyEmpty=false → TIMPA SEMUA (termasuk yang sudah diatur manual).
+  async function runAutoKernAll(onlyEmpty: boolean) {
     if (autoBusy) return;
-    if (!confirm(
-      "Auto-kern optikal SELURUH pasangan huruf & angka?\n\n" +
-      "Hanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah. " +
-      "Bisa memakan beberapa detik.")) return;
+    const msg = onlyEmpty
+      ? "Auto-kern optikal pasangan huruf & angka?\n\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah. Bisa memakan beberapa detik."
+      : "Auto-kern optikal SEMUA pasangan huruf & angka?\n\n⚠️ Nilai kerning yang sudah Anda atur akan DITIMPA hasil hitung optikal. Bisa memakan beberapa detik.";
+    if (!confirm(msg)) return;
     setAutoBusy(true);
     try {
-      const r = await serial(() => api.autoKernAll(true));
+      const r = await serial(() => api.autoKernAll(onlyEmpty));
       onKern?.(); // bump editV → panel & webfont menyusul
-      alert(`Auto-kern selesai:\n${r.written} pasangan ditulis · ${r.skipped} dilewati (sudah ada)\ndari ${r.candidates} glyph huruf/angka.`);
+      alert(`Auto-kern selesai:\n${r.written} pasangan ditulis · ${r.skipped} dilewati\ndari ${r.candidates} glyph huruf/angka.`);
     } catch (e) {
       alert("Auto-kern gagal: " + ((e as Error).message || e));
     } finally {
       setAutoBusy(false);
     }
   }
-  // keluar dari mode Kerning dgn nilai tertahan → buang (kembali ke tersimpan)
-  useEffect(() => { if (mode !== "kerning" && kernDirtyRef.current) { setKernDirty(false); setTrackVal(tracking); } }, [mode, tracking]);
+  // keluar dari mode Kerning dgn nilai tertahan → BUANG SEPENUHNYA: kembalikan juga kernVal &
+  // guard echo. (Dulu hanya setKernDirty(false) → draft nyangkut tampil sbg "tersimpan" palsu
+  // saat masuk lagi, krn refetch di-skip oleh guard pendingKern.)
+  useEffect(() => {
+    if (mode !== "kerning" && kernDirtyRef.current) {
+      kernDirtyRef.current = false; setKernDirty(false); setTrackVal(tracking);
+      pendingKern.current = null;
+      setKernVal(kernScoped(kernInfoRef.current, kernScopeRef.current));
+    }
+  }, [mode, tracking]); // eslint-disable-line react-hooks/exhaustive-deps
   // STAGE: seret kanvas / ketik angka → pratinjau live + tandai "belum ditetapkan" (tak menulis apa pun)
   function stageKern(v: number) {
     if (kernScope === "all") { setTrackVal(v); setKernDirty(v !== tracking); return; }
@@ -289,6 +327,7 @@ export function GlyphEditor({
   // TERAPKAN: tulis nilai tertahan ke font (tracking global / kern kelas / exception pasangan)
   function applyKern() {
     if (kernScope === "all") { onTracking?.(trackVal); setKernDirty(false); return; }
+    if (kernScope === "smart") smartSkipRef.current = true; // bump fontV hasil apply ini jangan memicu hitung-ulang yang menimpa nilai baru
     commitKern(kernVal); setKernDirty(false);
   }
   // BATAL: buang nilai tertahan, kembali ke nilai tersimpan
@@ -399,8 +438,9 @@ export function GlyphEditor({
   // TEXT: resolve KERN pasangan yg terlihat (glyph sudah dimuat; kern menyusul, ringan, debounce kecil)
   useEffect(() => {
     if (mode !== "text" || !proofKern || !proofText.trim()) return;
-    const fontChanged = kernVerRef.current !== fontV; kernVerRef.current = fontV;
+    const fontChanged = kernVerRef.current !== fontV;
     const timer = setTimeout(async () => {
+      kernVerRef.current = fontV; // konsumsi DI DALAM timer — kalau di badan efek, debounce yang dibatalkan (ketikan beruntun <120ms) menelan sinyal & pasangan terlihat tak pernah disegarkan
       const pairs = new Set<string>();
       for (const line of proofText.split("\n")) {
         let prev: string | null = null;
@@ -411,6 +451,8 @@ export function GlyphEditor({
       // KECUALI pasangan yang BARU ditulis lokal (<1.5s): respons refetch bisa lebih tua dari
       // tulisan kita (GET tak lewat antrean serial) → menimpa = nilai "balik sendiri" saat diseret.
       const fresh = (p: string) => Date.now() - (kernWroteAt.current[p] ?? 0) < 1500;
+      if (fontChanged) // pasangan ter-cache yang TAK terlihat ikut basi (mis. auto-kern/kelas) → buang; difetch lagi saat muncul
+        for (const p of Object.keys(kernCache.current)) if (!pairs.has(p) && !fresh(p)) delete kernCache.current[p];
       const need = fontChanged ? [...pairs].filter((p) => !fresh(p))
                                : [...pairs].filter((p) => !(p in kernCache.current));
       if (!need.length) return;
@@ -1238,8 +1280,12 @@ export function GlyphEditor({
           </div>
           {mode === "kerning" ? (
             <KerningCanvas
-              left={kernSide === "left" ? { path, comps, advance: d.advance, isCurrent: true } : (partnerData ? { path: partnerData.path, comps: [], advance: partnerData.advance, isCurrent: false } : null)}
-              right={kernSide === "left" ? (partnerData ? { path: partnerData.path, comps: [], advance: partnerData.advance, isCurrent: false } : null) : { path, comps, advance: d.advance, isCurrent: true }}
+              left={kernSide === "left"
+                ? (kernSelfName === name ? { path, comps, advance: d.advance, isCurrent: true } : (selfData ? { path: selfData.path, comps: [], advance: selfData.advance, isCurrent: false } : null))
+                : (partnerData ? { path: partnerData.path, comps: [], advance: partnerData.advance, isCurrent: false } : null)}
+              right={kernSide === "left"
+                ? (partnerData ? { path: partnerData.path, comps: [], advance: partnerData.advance, isCurrent: false } : null)
+                : (kernSelfName === name ? { path, comps, advance: d.advance, isCurrent: true } : (selfData ? { path: selfData.path, comps: [], advance: selfData.advance, isCurrent: false } : null))}
               kern={kernVal} tracking={kernScope === "all" ? trackVal : tracking}
               editValue={kernScope === "all" ? trackVal : kernVal}
               onEdit={kernScope === "all" ? setTrackVal : setKernVal}
@@ -1556,14 +1602,21 @@ export function GlyphEditor({
         ) : mode === "kerning" ? (
           <>
             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: "var(--bg-2)", color: "var(--good)" }}>Kerning</span>
-            <span className="text-sm font-semibold tabular-nums">{kernLeft || "?"} · {kernRight || "?"}</span>
+            {/* glyph AKTIF bisa diganti LANGSUNG di sini (nama glyph atau 1 karakter) — tanpa klik panel kiri */}
+            <label className="flex items-center gap-1">
+              <span className="label">Glyph</span>
+              <input list="ge-glyphnames-k" className="field !w-20 !py-1.5 text-sm" value={kernSelf}
+                onChange={(e) => setKernSelf(e.target.value)} placeholder="glyph"
+                title="Glyph aktif pasangan — ketik nama glyph atau satu karakter (mis. A). Tak perlu klik panel kiri." />
+            </label>
+            <span className="text-sm font-semibold tabular-nums" title="Pasangan (kiri · kanan)">{kernLeft || "?"} · {kernRight || "?"}</span>
             <button className="btn !py-1.5" onClick={() => setKernSide((s) => (s === "left" ? "right" : "left"))} title="Tukar: glyph aktif di kiri/kanan pasangan">
               <ArrowLeftRight className="size-4" />{kernSide === "left" ? "aktif di kiri" : "aktif di kanan"}
             </button>
             <label className="flex items-center gap-1">
               <span className="label">Partner</span>
-              <input list="ge-glyphnames-k" className="field !w-24 !py-1.5 text-sm" value={kernPartner}
-                onChange={(e) => setKernPartner(e.target.value)} placeholder="glyph" title="Glyph pasangan kerning" />
+              <input list="ge-glyphnames-k" className="field !w-20 !py-1.5 text-sm" value={kernPartner}
+                onChange={(e) => setKernPartner(e.target.value)} placeholder="glyph" title="Glyph pasangan kerning — nama glyph atau satu karakter" />
               <GlyphNameList id="ge-glyphnames-k" names={glyphNames} />
             </label>
             {/* satu field: "Semuanya"→tracking global · "Kelas"/"Pasangan"→kern pasangan.
@@ -1606,10 +1659,27 @@ export function GlyphEditor({
               </button>
             )}
             {kernScope === "smart" && (
-              <button className="btn btn-accent !py-1.5" onClick={runAutoKernAll} disabled={autoBusy}
-                title="Auto-kern optikal SELURUH pasangan huruf & angka sekaligus (aman: hanya mengisi yang belum ada)">
-                {autoBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Auto-kern semua
-              </button>
+              <div className="relative">
+                <button className="btn btn-accent !py-1.5" onClick={() => setAutoMenu((v) => !v)} disabled={autoBusy}
+                  title="Auto-kern optikal SELURUH pasangan huruf & angka — pilih: isi yang kosong saja, atau timpa semua">
+                  {autoBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Auto-kern semua
+                </button>
+                {autoMenu && (
+                  <div className="absolute top-full left-0 mt-1 z-50 rounded-xl border p-1 flex flex-col w-72 shadow-lg"
+                       style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
+                    <button className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[var(--bg)]"
+                      onClick={() => { setAutoMenu(false); runAutoKernAll(true); }}>
+                      <div className="font-medium">Hanya yang belum diatur (aman)</div>
+                      <div className="text-faint mt-0.5">Mengisi pasangan kosong — kerning yang sudah Anda atur tidak diubah</div>
+                    </button>
+                    <button className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[var(--bg)]"
+                      onClick={() => { setAutoMenu(false); runAutoKernAll(false); }}>
+                      <div className="font-medium" style={{ color: "#e8a13a" }}>Timpa semua</div>
+                      <div className="text-faint mt-0.5">Hitung ulang optikal SEMUA pasangan — termasuk yang sudah diatur manual</div>
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
             <button className="btn !py-1.5" onClick={expandKernClasses} disabled={kernBusy}
               title="Gabungkan varian aksen (Á,Â,Ä…) ke kelas huruf dasarnya → kern dasar otomatis berlaku utk aksen. Sekali jalan; mengubah groups + kerning.">
