@@ -9,6 +9,9 @@ export type Session = {
   authenticated: boolean;
   role?: string | null;
   userId?: string | null;
+  name?: string | null;      // nama tampil (dari /verify Sensatype)
+  email?: string | null;
+  avatarUrl?: string | null; // foto profil (opsional)
   allowed?: boolean; // punya hak masuk Font Tool (fitur #2); false → layar "akses ditolak"
 };
 

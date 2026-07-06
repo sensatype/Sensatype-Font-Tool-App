@@ -80,6 +80,41 @@ def _side_signature(contours, b, side, samples, upm):
     return tuple(depth)
 
 
+def _reference_target(font, upm, step, refs=("n", "H", "o", "x", "m", "u")):
+    """Celah 'datar' acuan = avgGap pasangan referensi lurus (mis. n|n). Basis kalibrasi
+    smart kern: pasangan yang lebih 'terbuka' dari acuan → kern negatif (rapatkan)."""
+    for ref in refs:
+        if ref in font:
+            p = _profiles(font[ref])
+            if p:
+                t = _avg_gap(p[0], font[ref].width, p[0], step)
+                if t is not None:
+                    return t
+    return upm * 0.16
+
+
+def smart_pair(font, left, right, *, upm, step=10, deadband=3, clamp_frac=0.18, target=None):
+    """Kern optikal (sadar-bentuk) untuk SATU pasangan. TIDAK menulis apa pun — hanya menghitung.
+    Bentuk lurus/bulat/menjorok/diagonal menyesuaikan sendiri lewat avgGap berhadapan.
+    Return int (0 bila tak ada data atau dalam deadband)."""
+    if left not in font or right not in font:
+        return 0
+    Lp = _profiles(font[left])
+    Rp = _profiles(font[right])
+    if not Lp or not Rp:
+        return 0
+    if target is None:
+        target = _reference_target(font, upm, step)
+    avg = _avg_gap(Lp[0], font[left].width, Rp[0], step)
+    if avg is None:
+        return 0
+    k = round(target - avg)
+    if abs(k) < deadband:
+        return 0
+    clamp = upm * clamp_frac
+    return int(max(-clamp, min(clamp, k)))
+
+
 def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
                   deadband=8, step=10, samples=10, clamp_frac=0.15):
     """Hitung & tulis seed kerning class-level ke `font`. Return dict laporan."""

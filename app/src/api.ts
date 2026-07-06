@@ -131,6 +131,11 @@ export const api = {
     fetch(`${BASE}/kerning/list?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ""}`)
       .then(j<{ pairs: KernListEntry[]; total: number; matched: number }>),
 
+  // Smart kern: saran kern optikal (sadar-bentuk) utk satu pasangan — read-only.
+  smartKern: (left: string, right: string) =>
+    fetch(`${BASE}/kerning/smart?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`)
+      .then(j<{ left: string; right: string; value: number }>),
+
   setKerning: (body: { left: string; right: string; value: number; scope?: "class" | "pair"; recompile?: boolean }) =>
     fetch(`${BASE}/kerning`, {
       method: "PUT",

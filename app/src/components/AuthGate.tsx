@@ -3,8 +3,15 @@ import { Loader2, LogIn, ExternalLink, ShieldX } from "lucide-react";
 import { authApi, focusApp, isElectron, openLoginUrl, type Session } from "../auth";
 import { setUnauthorizedHandler } from "../api";
 
-// Konteks auth untuk komponen di dalam app (mis. TopBar): role + logout.
-type AuthCtx = { role?: string | null; userId?: string | null; logout: () => Promise<void> };
+// Konteks auth untuk komponen di dalam app (mis. TopBar): identitas akun + logout.
+type AuthCtx = {
+  role?: string | null;
+  userId?: string | null;
+  name?: string | null;
+  email?: string | null;
+  avatarUrl?: string | null;
+  logout: () => Promise<void>;
+};
 const Ctx = createContext<AuthCtx>({ logout: async () => {} });
 export const useAuth = () => useContext(Ctx);
 
@@ -121,7 +128,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         </Screen>
       );
     return (
-      <Ctx.Provider value={{ role: phase.s.role, userId: phase.s.userId, logout }}>
+      <Ctx.Provider value={{
+        role: phase.s.role, userId: phase.s.userId, name: phase.s.name,
+        email: phase.s.email, avatarUrl: phase.s.avatarUrl, logout,
+      }}>
         {children}
       </Ctx.Provider>
     );

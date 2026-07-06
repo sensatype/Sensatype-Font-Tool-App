@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { FolderOpen, Plus, Trash2, Loader2, Type, LogOut } from "lucide-react";
+import { FolderOpen, Plus, Trash2, Loader2, Type } from "lucide-react";
 import { api, type ProjectSummary } from "../api";
-import { useAuth } from "./AuthGate";
+import { AccountChip } from "./AccountChip";
 
 function rel(ts: number): string {
   const s = Math.max(1, Math.floor((Date.now() - ts) / 1000));
@@ -18,7 +18,6 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
   onCreate: () => void;
   canDelete: boolean;
 }) {
-  const { role, logout } = useAuth();
   const [items, setItems] = useState<ProjectSummary[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -46,16 +45,13 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
         <div className="flex items-center gap-3 mb-6">
           <h1 className="text-xl font-semibold">Project Anda</h1>
           {items && <span className="text-muted text-sm">{items.length} project</span>}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-3">
             <button className="btn btn-accent" onClick={onCreate}>
               <Plus className="size-4" /> Project baru
             </button>
-            {/* Akun bisa diakses di luar project juga → ganti akun dari mana saja. */}
+            {/* Akun (profil + nama) bisa diakses di luar project juga → ganti akun dari mana saja. */}
             <div className="h-5 w-px" style={{ background: "var(--border-2)" }} />
-            <span className="text-xs text-muted capitalize" title="Akun Sensatype yang sedang masuk">{role ?? "—"}</span>
-            <button className="btn" onClick={() => logout()} title="Keluar / ganti akun">
-              <LogOut className="size-4" /> Ganti akun
-            </button>
+            <AccountChip />
           </div>
         </div>
 

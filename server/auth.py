@@ -240,7 +240,8 @@ def current_session() -> dict:
     """-> {authenticated, userId?, role?, allowed?}. Introspeksi token tersimpan (cache singkat).
     `allowed` = punya hak masuk Font Tool (fitur #2 — kalau False, UI tampilkan 'akses ditolak')."""
     if AUTH_DISABLED:
-        return {"authenticated": True, "userId": "dev", "role": "admin", "allowed": True}
+        return {"authenticated": True, "userId": "dev", "name": "Developer",
+                "email": "dev@sensatype.local", "avatarUrl": None, "role": "admin", "allowed": True}
     at = get_access_token()
     if not at:
         return {"authenticated": False}
@@ -251,7 +252,11 @@ def current_session() -> dict:
     if not res.get("valid"):
         return {"authenticated": False}
     role = res.get("role")
+    # name/email/avatarUrl dari respons /verify Sensatype (opsional — UI menampilkan bila ada).
     return {"authenticated": True, "userId": res.get("userId"), "role": role,
+            "name": res.get("name") or res.get("fullName") or res.get("displayName"),
+            "email": res.get("email"),
+            "avatarUrl": res.get("avatarUrl") or res.get("avatar") or res.get("photoURL"),
             "allowed": _access_allowed(role, res)}
 
 

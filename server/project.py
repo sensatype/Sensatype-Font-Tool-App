@@ -755,6 +755,17 @@ class Project:
             "pairValue": int(kern[(left, right)]) if (left, right) in kern else None,
         }
 
+    def smart_kern(self, left, right):
+        """Saran kern OPTIKAL (sadar-bentuk) untuk satu pasangan — TIDAK menulis apa pun.
+        Menghitung dari geometri outline (bentuk lurus/bulat/menjorok/diagonal menyesuaikan).
+        Frontend menampilkannya sbg nilai tertahan; ditulis hanya saat user klik Terapkan."""
+        font = self._font()
+        if left not in font or right not in font:
+            raise ValueError(f"Glyph tidak dikenal: {left!r} / {right!r}")
+        upm = font.info.unitsPerEm or 1000
+        v = kerning_mod.smart_pair(font, left, right, upm=upm)
+        return {"left": left, "right": right, "value": int(v)}
+
     @_locked
     def expand_kern_groups(self):
         """Gabungkan varian aksen ke kelas kern huruf dasarnya (À,Á,Â… → kelas A, sisi kiri & kanan)

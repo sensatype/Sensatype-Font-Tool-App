@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Download, RefreshCw, FolderOpen, Loader2, LogOut } from "lucide-react";
+import { Download, RefreshCw, FolderOpen, Loader2 } from "lucide-react";
 import { api } from "../api";
 import { can } from "../auth";
 import { useAuth } from "./AuthGate";
+import { AccountChip } from "./AccountChip";
 import type { ProjectState } from "../types";
 
 // window.showSaveFilePicker (File System Access API) — ada di Chromium/Electron pada konteks aman (localhost).
@@ -28,7 +29,7 @@ export function TopBar({
   onRespace: (preset: string) => void;
   onHome: () => void;
 }) {
-  const { role, logout } = useAuth();
+  const { role } = useAuth();
   const [exporting, setExporting] = useState(false);
 
   async function handleExport() {
@@ -121,10 +122,7 @@ export function TopBar({
           </button>
         )}
         <div className="h-5 w-px" style={{ background: "var(--border-2)" }} />
-        <span className="text-xs text-muted capitalize" title="Peran akun Sensatype">{role ?? "—"}</span>
-        <button className="btn !px-2" onClick={() => logout()} title="Keluar">
-          <LogOut className="size-4" />
-        </button>
+        <AccountChip />
       </div>
     </header>
   );
