@@ -93,9 +93,62 @@ def _reference_target(font, upm, step, refs=("n", "H", "o", "x", "m", "u")):
     return upm * 0.16
 
 
+def _pair_gaps(Lc, Ladv, Rc, step):
+    """Daftar (y, celah) berhadapan antara sisi kanan L dan sisi kiri R pada tiap ketinggian y
+    (hanya di rentang tinggi tempat KEDUANYA punya tinta)."""
+    Lb = htls._bounds(Lc)
+    Rb = htls._bounds(Rc)
+    y0 = max(Lb[1], Rb[1])
+    y1 = min(Lb[3], Rb[3])
+    if y1 <= y0:
+        return []
+    out = []
+    y = y0
+    while y <= y1:
+        l = htls._margins_at(Lc, y)
+        r = htls._margins_at(Rc, y)
+        if l[1] is not None and r[0] is not None:
+            out.append((y, (Ladv - l[1]) + r[0]))
+        y += step
+    return out
+
+
+def _kern_from_gaps(gaps, target, upm, deadband, clamp_frac):
+    """Model optik v2 — dua prinsip, keduanya DITURUNKAN dari font itu sendiri (target = celah
+    pasangan lurus referensi milik font, jadi ikut gelap-terang/style font):
+
+    1. RATA-RATA TERBOBOT: pusat zona overlap berbobot penuh, tepi meluruh (1/(1+t²)).
+       Efeknya bentuk menyesuaikan sendiri — lurus|lurus: celah = target; lurus|bulat: perut
+       lengkung merapat (~80-90% target, sudut terbuka di atas/bawah tak dihitung penuh);
+       diagonal/menjorok (T·o, A·V, L·T): area terbuka besar → merapat kuat.
+    2. LANTAI ANTI-TABRAKAN: kern negatif tak boleh membuat celah MINIMUM < 30% target —
+       bentuk runcing/serif tak akan bersentuhan; dan lantai tak pernah MEMAKSA merenggang.
+    """
+    if not gaps:
+        return 0
+    y0 = min(y for y, _ in gaps)
+    y1 = max(y for y, _ in gaps)
+    yc = (y0 + y1) / 2.0
+    ys = max((y1 - y0) / 2.0, 1.0)
+    num = den = 0.0
+    for y, g in gaps:
+        w = 1.0 / (1.0 + ((y - yc) / ys) ** 2)
+        num += w * g
+        den += w
+    k = target - num / den
+    if k < 0:
+        min_gap = min(g for _, g in gaps)
+        floor = 0.30 * target
+        k = max(k, min(0.0, floor - min_gap))  # rapatkan maksimal sampai celah tersempit = lantai
+    k = round(k)
+    if abs(k) < deadband:
+        return 0
+    clamp = upm * clamp_frac
+    return int(max(-clamp, min(clamp, k)))
+
+
 def smart_pair(font, left, right, *, upm, step=10, deadband=3, clamp_frac=0.18, target=None):
     """Kern optikal (sadar-bentuk) untuk SATU pasangan. TIDAK menulis apa pun — hanya menghitung.
-    Bentuk lurus/bulat/menjorok/diagonal menyesuaikan sendiri lewat avgGap berhadapan.
     Return int (0 bila tak ada data atau dalam deadband)."""
     if left not in font or right not in font:
         return 0
@@ -105,14 +158,8 @@ def smart_pair(font, left, right, *, upm, step=10, deadband=3, clamp_frac=0.18, 
         return 0
     if target is None:
         target = _reference_target(font, upm, step)
-    avg = _avg_gap(Lp[0], font[left].width, Rp[0], step)
-    if avg is None:
-        return 0
-    k = round(target - avg)
-    if abs(k) < deadband:
-        return 0
-    clamp = upm * clamp_frac
-    return int(max(-clamp, min(clamp, k)))
+    gaps = _pair_gaps(Lp[0], font[left].width, Rp[0], step)
+    return _kern_from_gaps(gaps, target, upm, deadband, clamp_frac)
 
 
 def auto_kern_pairs(font, names, *, upm, step=10, deadband=6, clamp_frac=0.18, target=None):
@@ -159,14 +206,11 @@ def auto_kern_pairs(font, names, *, upm, step=10, deadband=6, clamp_frac=0.18, t
                 l = Ltab.get(y)
                 r = Rtab.get(y)
                 if l and r:
-                    gaps.append((Ladv - l[1]) + r[0])
+                    gaps.append((y, (Ladv - l[1]) + r[0]))
                 y += step
-            if not gaps:
-                continue
-            k = round(target - sum(gaps) / len(gaps))
-            if abs(k) < deadband:
-                continue
-            out[(L, R)] = int(max(-clamp, min(clamp, k)))
+            k = _kern_from_gaps(gaps, target, upm, deadband, clamp_frac)  # model optik v2 (sama dgn Smart per-pasangan)
+            if k:
+                out[(L, R)] = k
     return out
 
 

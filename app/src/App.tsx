@@ -120,7 +120,7 @@ export function App() {
     return <ProjectsHub onOpen={openProject} onCreate={createProject}
                         canDelete={!!role && ADMIN_ROLES.includes(role)} />;
   if (!project) return <div className="h-full grid place-items-center text-muted">Memuat…</div>;
-  if (project.empty) return <ImportWizard onImported={(st) => applyState(st, false)} />;
+  if (project.empty) return <ImportWizard onImported={(st) => applyState(st, false)} onHome={() => setView("hub")} />;
 
   return (
     <div className="h-full flex flex-col">

@@ -10,7 +10,10 @@ export function AccountChip() {
   const ref = useRef<HTMLDivElement>(null);
   // PENTING: userId dari server bisa ANGKA (mis. 1) & name bisa null → paksa ke String,
   // kalau tidak `display.trim()` melempar "x.trim is not a function" → crash render → layar kosong.
-  const display = String(name || userId || "Akun");
+  // Tanpa nama dari server, tampilkan "Akun #1" (bukan angka telanjang yang terlihat aneh).
+  const idStr = userId == null ? "" : String(userId);
+  const fallback = !idStr ? "Akun" : (/^\d+$/.test(idStr) ? `Akun #${idStr}` : idStr);
+  const display = name ? String(name) : fallback;
   const initial = (display.trim()[0] || "?").toUpperCase();
 
   useEffect(() => {

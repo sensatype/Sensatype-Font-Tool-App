@@ -10,6 +10,7 @@
 //    dgn UI di mode prod → tanpa isu CORS/CSRF).
 const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const { checkForUpdates } = require("./updater.cjs");
@@ -139,9 +140,24 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+// Ukuran/posisi jendela diingat antar-sesi (quit → buka lagi = ukuran terakhir).
+const boundsFile = () => path.join(app.getPath("userData"), "window-bounds.json");
+function loadBounds() {
+  try { return JSON.parse(fs.readFileSync(boundsFile(), "utf8")); } catch { return null; }
+}
+function saveBounds() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    fs.writeFileSync(boundsFile(), JSON.stringify({ ...mainWindow.getNormalBounds(), maximized: mainWindow.isMaximized() }));
+  } catch { /* disk penuh dsb — abaikan */ }
+}
+
 function createWindow() {
+  const saved = loadBounds();
   mainWindow = new BrowserWindow({
-    width: 1400, height: 900, minWidth: 1000, minHeight: 640,
+    width: saved?.width ?? 1400, height: saved?.height ?? 900,
+    ...(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? { x: saved.x, y: saved.y } : {}),
+    minWidth: 1000, minHeight: 640,
     backgroundColor: "#14171d", show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -150,7 +166,9 @@ function createWindow() {
       sandbox: true,
     },
   });
+  if (saved?.maximized) mainWindow.maximize();
   mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.on("close", saveBounds); // simpan ukuran terakhir saat ditutup
   // Tampilkan "Memuat…" DULU (bukan langsung app) → jendela tak pernah blank sementara backend start.
   mainWindow.loadURL(LOADING_PAGE);
   // Bila app URL sudah dimuat lalu gagal (backend hiccup) → coba muat ulang.

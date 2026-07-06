@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Loader2, Trash2, Combine, Scissors, Eye, ArrowRight, ArrowLeft, Wand2, Eraser, Undo2, Redo2, Type } from "lucide-react";
+import { Upload, Loader2, Trash2, Combine, Scissors, Eye, ArrowRight, ArrowLeft, Wand2, Eraser, Undo2, Redo2, Type, FolderOpen } from "lucide-react";
 import { api } from "../api";
 import { SpecimenCanvas } from "./SpecimenCanvas";
 import { AccountChip } from "./AccountChip";
@@ -7,7 +7,7 @@ import type { ProjectState, StagedShape, StagingState } from "../types";
 
 type Step = "upload" | "clean" | "map";
 
-export function ImportWizard({ onImported }: { onImported: (s: ProjectState) => void }) {
+export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectState) => void; onHome?: () => void }) {
   const [step, setStep] = useState<Step>("upload");
   const [staging, setStaging] = useState<StagingState | null>(null);
   const [sel, setSel] = useState<Set<number>>(new Set());
@@ -134,8 +134,13 @@ export function ImportWizard({ onImported }: { onImported: (s: ProjectState) => 
   if (step === "upload") {
     return (
       <div className="h-full overflow-auto grid place-items-center p-8 relative">
-        {/* Akun (profil + nama) juga di sini (project baru/kosong) → ganti akun di mana pun. */}
-        <div className="absolute top-4 right-4">
+        {/* Kembali ke daftar project + akun (profil + nama) → keduanya bisa diakses di sini juga. */}
+        <div className="absolute top-4 right-4 flex items-center gap-2">
+          {onHome && (
+            <button className="btn" onClick={onHome} title="Kembali ke daftar project">
+              <FolderOpen className="size-4" /> Beranda
+            </button>
+          )}
           <AccountChip />
         </div>
         <div className="w-full max-w-xl">

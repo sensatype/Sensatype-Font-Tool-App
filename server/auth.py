@@ -252,11 +252,30 @@ def current_session() -> dict:
     if not res.get("valid"):
         return {"authenticated": False}
     role = res.get("role")
-    # name/email/avatarUrl dari respons /verify Sensatype (opsional — UI menampilkan bila ada).
+    # name/email/avatarUrl dari respons /verify Sensatype — dicari toleran: level atas ATAU
+    # objek `user` bersarang, dgn berbagai gaya penamaan. UI menampilkan bila ada.
+    def field(*keys):
+        user = res.get("user") if isinstance(res.get("user"), dict) else None
+        for src in (res, user):
+            if not src:
+                continue
+            for k in keys:
+                v = src.get(k)
+                if v:
+                    return v
+        return None
+
+    avatar = field("avatarUrl", "avatar_url", "avatar", "photoURL", "photo_url",
+                   "profilePicture", "profile_picture", "photo")
+    if isinstance(avatar, str) and avatar.startswith("/"):
+        # path relatif (mis. /uploads/foto.jpg) → absolutkan ke host Sensatype
+        from urllib.parse import urlsplit
+        s = urlsplit(API_BASE)
+        avatar = f"{s.scheme}://{s.netloc}{avatar}"
     return {"authenticated": True, "userId": res.get("userId"), "role": role,
-            "name": res.get("name") or res.get("fullName") or res.get("displayName"),
-            "email": res.get("email"),
-            "avatarUrl": res.get("avatarUrl") or res.get("avatar") or res.get("photoURL"),
+            "name": field("name", "fullName", "full_name", "displayName", "display_name", "username"),
+            "email": field("email"),
+            "avatarUrl": avatar,
             "allowed": _access_allowed(role, res)}
 
 

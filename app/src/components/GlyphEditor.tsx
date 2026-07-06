@@ -19,6 +19,8 @@ const TOOLS: { id: Mode; label: string; icon: any; hint: string; ready: boolean 
   { id: "kerning", label: "Kerning", icon: ArrowLeftRight, hint: "Atur pasangan kerning", ready: true },
   { id: "text", label: "Text", icon: Type, hint: "Ketik/tempel teks (proofing)", ready: true },
 ];
+// mode terakhir yang dipilih user — level modul agar SELAMAT dari remount per-glyph (key=nama)
+const lastModeRef: { mode: Mode } = { mode: "contour" };
 type Sel = Set<string>; // kunci node terpilih: "ci:pi" (multi-select)
 const keyOf = (ci: number, pi: number) => `${ci}:${pi}`;
 const parseKey = (k: string) => { const [ci, pi] = k.split(":"); return { ci: +ci, pi: +pi }; };
@@ -59,7 +61,10 @@ export function GlyphEditor({
   onChanged: (g: Glyph) => void;
 }) {
   const [d, setD] = useState<GlyphDetail | null>(null);
-  const [mode, setMode] = useState<Mode>("contour");
+  // mode bertahan saat GANTI GLYPH: komponen di-remount per glyph (key=nama), jadi state biasa
+  // selalu balik ke "contour" — simpan pilihan terakhir di variabel modul.
+  const [mode, setModeState] = useState<Mode>(lastModeRef.mode);
+  const setMode = (m: Mode) => { lastModeRef.mode = m; setModeState(m); };
   const [contours, setContours] = useState<ContourPoint[][]>([]);
   const [lsb, setLsb] = useState(0);
   const [rsb, setRsb] = useState(0);
@@ -1180,7 +1185,9 @@ export function GlyphEditor({
     const byC = new Map<number, number[]>();
     for (const k of sel) { const { ci, pi } = parseKey(k); const p = contours[ci]?.[pi]; if (p && p.type !== "offcurve") { if (!byC.has(ci)) byC.set(ci, []); byC.get(ci)!.push(pi); } }
     if (!byC.size) return;
-    const next = contours.map((c, ci) => { const arr = byC.get(ci); if (!arr) return c; let cc = c; for (const pi of arr.sort((a, b) => b - a)) cc = removeNode(cc, pi); return cc; });
+    const next = contours
+      .map((c, ci) => { const arr = byC.get(ci); if (!arr) return c; let cc = c; for (const pi of arr.sort((a, b) => b - a)) { cc = removeNode(cc, pi); if (!cc.length) break; } return cc; })
+      .filter((c) => c.length); // kontur yang habis nodenya dibuang seluruhnya (glyph boleh jadi kosong)
     setSel(new Set()); setContours(next); commitOutline(next);
   }
   // ubah node on-curve antara SUDUT (kotak, handle independen) ⇄ HALUS (lingkaran, handle terikat)
@@ -1317,10 +1324,12 @@ export function GlyphEditor({
                   React melewati ±ratusan <line> ini sama sekali (hot path drag tetap ringan) */}
               {showGrid && <CanvasGrid vbX={vbX} vbY={vbY} vbW={vbW} vbH={vbH} frameTop={frameTop}
                 step={snapStep} pxPer={elem.w / vbW} sw={handleStroke} minor={cv.gMinor} major={cv.gMajor} />}
-              {/* garis metrik horizontal — draggable di mode Spasi (base = geser glyph vertikal) */}
+              {/* garis metrik horizontal — asc/desc/cap/x draggable di mode Metrics. BASELINE TETAP
+                  (y=0, definisi): dulu ikut draggable & diam-diam menggeser seluruh glyph → karakter
+                  "ikut bergerak lalu pindah". Geser vertikal yang DISENGAJA: kolom "Base ±" di toolbar. */}
               {guides.map(([y, label, color, key]) => {
                 const isBase = key === null;
-                const dragg = mode === "metrics";
+                const dragg = mode === "metrics" && !isBase;
                 const ly = isBase ? baseLineY : y; // garis base ikut bergerak saat diseret (nempel ke grid)
                 return (
                   <g key={label} style={{ cursor: dragg ? "ns-resize" : "default" }}

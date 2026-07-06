@@ -124,9 +124,12 @@ export function addNode(pts: ContourPoint[], endIdx: number, t = 0.5): ContourPo
 // Hapus node on-curve `idx` beserta offcurve segmen yang menuju ke node itu.
 export function removeNode(pts: ContourPoint[], idx: number): ContourPoint[] {
   const n = pts.length;
+  if (!n || !pts[idx]) return pts; // kontur sudah kosong / index tak valid
   if (pts[idx].type === "offcurve") return pts; // hanya on-curve
   const onCount = pts.filter((p) => p.type !== "offcurve").length;
-  if (onCount <= 2) return pts; // jaga minimal 2 on-curve
+  // tinggal ≤2 on-curve: kontur tak lagi berbentuk → hapus SELURUH kontur.
+  // (Dulu di-guard "minimal 2" → dua node terakhir tak pernah bisa dihapus.)
+  if (onCount <= 2) return [];
   const remove = new Set<number>([idx]);
   // offcurve tepat sebelum node (segmen yang menuju node ini)
   let i = (idx - 1 + n) % n;
