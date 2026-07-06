@@ -20,10 +20,13 @@ Aplikasi = Electron (shell) + backend Python (FastAPI/uvicorn) + UI React.
   bisa diakses tanpa token).
 - **Windows (NSIS):** auto-update penuh — unduh di latar → "Pasang & mulai ulang".
   Jalan tanpa code-signing.
-- **macOS:** Squirrel.Mac wajib app ber-signature Developer ID untuk auto-install.
-  Build ini tanpa signing → aplikasi hanya **cek versi + beri tahu + buka halaman
-  rilis** untuk unduh `.dmg` manual. (Kalau nanti mau auto-install penuh di mac,
-  perlu sertifikat Apple Developer + notarization.)
+- **macOS:** Squirrel.Mac (electron-updater) wajib Developer ID + notarization, yang
+  tak dipakai. Sebagai gantinya **updater kustom** (`updater.cjs` → `macUpdate`): unduh
+  `.dmg` sendiri di latar (bar progres di Dock) → mount → ganti bundle + `xattr -dr`
+  karantina → **restart otomatis**. Tanpa browser/pilih file/xattr manual. Karena app
+  yang mengunduh (bukan browser), berkas tak berkarantina → Gatekeeper tak menghadang saat
+  relaunch. Batasnya: instalasi PERTAMA (unduhan browser) tetap perlu "Open Anyway" sekali;
+  hilang total hanya dgn Apple Developer ID + notarization.
 - Menu **Bantuan → Periksa Pembaruan…** memicu cek manual; ada juga auto-cek ~4 dtk
   setelah aplikasi terbuka.
 - **Naikkan `version` di `app/package.json` setiap rilis** — updater membandingkan
