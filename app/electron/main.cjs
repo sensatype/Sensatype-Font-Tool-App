@@ -81,7 +81,14 @@ async function ensureBackend() {
     cwd = REPO_ROOT;
   }
 
-  backendProc = spawn(cmd, args, { cwd, env, stdio: "inherit" });
+  backendProc = spawn(cmd, args, {
+    cwd,
+    env,
+    // Terpasang: buang stdio (tak ada konsol untuk ditulisi). Dev: warisi (lihat log di terminal).
+    stdio: app.isPackaged ? "ignore" : "inherit",
+    // Windows: cegah jendela terminal muncul saat menjalankan backend beku (CREATE_NO_WINDOW).
+    windowsHide: true,
+  });
   backendProc.on("exit", (code) => { console.log("[backend] keluar", code); backendProc = null; });
   return waitFor(`${BACKEND_ORIGIN}/api/health`, 20000);
 }
