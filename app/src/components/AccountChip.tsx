@@ -8,7 +8,9 @@ export function AccountChip() {
   const { name, role, email, avatarUrl, userId, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const display = name || userId || "Akun";
+  // PENTING: userId dari server bisa ANGKA (mis. 1) & name bisa null → paksa ke String,
+  // kalau tidak `display.trim()` melempar "x.trim is not a function" → crash render → layar kosong.
+  const display = String(name || userId || "Akun");
   const initial = (display.trim()[0] || "?").toUpperCase();
 
   useEffect(() => {

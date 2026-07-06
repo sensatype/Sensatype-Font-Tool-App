@@ -8,7 +8,7 @@ const BASE = "/api";
 export type Session = {
   authenticated: boolean;
   role?: string | null;
-  userId?: string | null;
+  userId?: string | number | null; // server bisa kirim angka
   name?: string | null;      // nama tampil (dari /verify Sensatype)
   email?: string | null;
   avatarUrl?: string | null; // foto profil (opsional)

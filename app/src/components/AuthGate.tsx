@@ -6,7 +6,7 @@ import { setUnauthorizedHandler } from "../api";
 // Konteks auth untuk komponen di dalam app (mis. TopBar): identitas akun + logout.
 type AuthCtx = {
   role?: string | null;
-  userId?: string | null;
+  userId?: string | number | null;
   name?: string | null;
   email?: string | null;
   avatarUrl?: string | null;
