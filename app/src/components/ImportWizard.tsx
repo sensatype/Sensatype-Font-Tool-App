@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Loader2, Trash2, Combine, Scissors, Eye, ArrowRight, ArrowLeft, Wand2, Eraser, Undo2, Redo2, Type } from "lucide-react";
+import { Upload, Loader2, Trash2, Combine, Scissors, Eye, ArrowRight, ArrowLeft, Wand2, Eraser, Undo2, Redo2, Type, LogOut } from "lucide-react";
 import { api } from "../api";
 import { SpecimenCanvas } from "./SpecimenCanvas";
+import { useAuth } from "./AuthGate";
 import type { ProjectState, StagedShape, StagingState } from "../types";
 
 type Step = "upload" | "clean" | "map";
 
 export function ImportWizard({ onImported }: { onImported: (s: ProjectState) => void }) {
+  const { role, logout } = useAuth();
   const [step, setStep] = useState<Step>("upload");
   const [staging, setStaging] = useState<StagingState | null>(null);
   const [sel, setSel] = useState<Set<number>>(new Set());
@@ -129,7 +131,14 @@ export function ImportWizard({ onImported }: { onImported: (s: ProjectState) => 
   // ---------- UPLOAD ----------
   if (step === "upload") {
     return (
-      <div className="h-full overflow-auto grid place-items-center p-8">
+      <div className="h-full overflow-auto grid place-items-center p-8 relative">
+        {/* Akun bisa diakses di sini juga (project baru/kosong) → ganti akun di mana pun. */}
+        <div className="absolute top-4 right-4 flex items-center gap-2">
+          <span className="text-xs text-muted capitalize" title="Akun Sensatype yang sedang masuk">{role ?? "—"}</span>
+          <button className="btn" onClick={() => logout()} title="Keluar / ganti akun">
+            <LogOut className="size-4" /> Ganti akun
+          </button>
+        </div>
         <div className="w-full max-w-xl">
           <div className="flex items-center gap-3 mb-1">
             <div className="size-9 rounded-xl bg-accent grid place-items-center text-white font-bold">S</div>
