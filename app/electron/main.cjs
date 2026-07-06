@@ -25,6 +25,18 @@ const RENDERER_URL = process.env.ELECTRON_RENDERER_URL || null; // dev: http://l
 const AUTH_API_BASE = process.env.SENSATYPE_API_BASE || "https://project.sensatype.com/api";
 const AUTH_LOGIN_URL = process.env.SENSATYPE_LOGIN_URL || "https://project.sensatype.com/login";
 
+// URL aplikasi (dev: Vite · prod: SPA dilayani backend). Halaman "Memuat…"/error =
+// data URL yang SELALU tampil sebelum backend siap → jendela tak pernah blank ("kosong").
+const APP_URL = RENDERER_URL || BACKEND_ORIGIN;
+const LOADING_PAGE = "data:text/html;charset=utf-8," + encodeURIComponent(
+  `<!doctype html><meta charset="utf-8"><body style="margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#14171d;color:#8b93a1;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">`
+  + `<div style="width:34px;height:34px;border:3px solid #2a2f3a;border-top-color:#4f8cff;border-radius:50%;animation:s .8s linear infinite"></div>`
+  + `<div style="font-size:13px">Memuat Sensatype Font Tool…</div><style>@keyframes s{to{transform:rotate(360deg)}}</style></body>`);
+const ERROR_PAGE = "data:text/html;charset=utf-8," + encodeURIComponent(
+  `<!doctype html><meta charset="utf-8"><body style="margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:#14171d;color:#e6e8ec;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:center;padding:0 30px">`
+  + `<div style="font-size:15px;font-weight:600">Gagal memulai mesin font</div>`
+  + `<div style="font-size:13px;color:#8b93a1;max-width:420px">Backend lokal tak merespons. Tutup lalu buka lagi aplikasi. Jika terus terjadi, pasang ulang versi terbaru.</div></body>`);
+
 let backendProc = null;
 let mainWindow = null;
 
@@ -72,6 +84,16 @@ async function ensureBackend() {
     // Data yang bisa berubah HARUS di lokasi writable (di dalam bundle app = read-only).
     env.SENSATYPE_PROJECTS_DIR = path.join(app.getPath("userData"), "projects");
     env.SENSATYPE_LEGACY_WORKSPACE = path.join(app.getPath("userData"), "workspace");
+    // macOS: bila app dipasang lewat drag (bukan skrip), backend beku bisa MASIH terkarantina →
+    // macOS memblokir eksekusinya → backend tak start → jendela "kosong". Lepas karantina dulu
+    // (best-effort) agar helper bisa dijalankan. Aman & idempotent.
+    if (process.platform === "darwin") {
+      try {
+        require("node:child_process").execFileSync(
+          "xattr", ["-dr", "com.apple.quarantine", path.join(process.resourcesPath, "backend")],
+          { stdio: "ignore", timeout: 5000 });
+      } catch { /* sudah bersih / tak ada xattr — abaikan */ }
+    }
   } else {
     // Mode dev: pakai uvicorn dari .venv repo.
     cmd = process.platform === "win32"
@@ -124,14 +146,12 @@ function createWindow() {
     },
   });
   mainWindow.once("ready-to-show", () => mainWindow.show());
-  // Dev: Vite (HMR). Prod: SPA dilayani backend (same-origin dgn /api).
-  const appUrl = RENDERER_URL || BACKEND_ORIGIN;
-  mainWindow.loadURL(appUrl);
-  // Jika halaman gagal dimuat (backend belum siap sesaat setelah update/cold-start) →
-  // coba muat ulang otomatis sampai backend melayani. Cegah jendela "kosong".
-  mainWindow.webContents.on("did-fail-load", (_e, _code, _desc, _url, isMainFrame) => {
-    if (isMainFrame && mainWindow && !mainWindow.isDestroyed()) {
-      setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(appUrl); }, 900);
+  // Tampilkan "Memuat…" DULU (bukan langsung app) → jendela tak pernah blank sementara backend start.
+  mainWindow.loadURL(LOADING_PAGE);
+  // Bila app URL sudah dimuat lalu gagal (backend hiccup) → coba muat ulang.
+  mainWindow.webContents.on("did-fail-load", (_e, _code, _desc, url, isMainFrame) => {
+    if (isMainFrame && url && url.startsWith(APP_URL) && mainWindow && !mainWindow.isDestroyed()) {
+      setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(APP_URL); }, 900);
     }
   });
   // Semua link http(s) → browser sistem; tak ada jendela app baru.
@@ -143,6 +163,19 @@ function createWindow() {
   mainWindow.webContents.on("will-navigate", (e, url) => {
     const base = RENDERER_URL || BACKEND_ORIGIN;
     if (!url.startsWith(base)) { e.preventDefault(); if (/^https?:/.test(url)) shell.openExternal(url); }
+  });
+  startAppLoad();
+}
+
+// Poll kesehatan backend lalu muat aplikasi. Sebelum backend sehat, jendela tetap di
+// halaman "Memuat…" (tak pernah blank). Setelah ~2 menit tanpa respons → halaman error.
+function startAppLoad(attempt = 0) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  ping(`${BACKEND_ORIGIN}/api/health`).then((ok) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (ok) mainWindow.loadURL(APP_URL);
+    else if (attempt < 170) setTimeout(() => startAppLoad(attempt + 1), 700);
+    else mainWindow.loadURL(ERROR_PAGE);
   });
 }
 
@@ -173,12 +206,12 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", () => {
     if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); }
   });
-  app.whenReady().then(async () => {
+  app.whenReady().then(() => {
     buildMenu();
-    if (!(await ensureBackend())) console.error("[backend] gagal start dalam 20s");
+    ensureBackend();   // spawn backend (tak diblok — createWindow menampilkan "Memuat…", startAppLoad menunggu health)
     createWindow();
     // Auto-cek pembaruan sekali setelah UI siap (senyap bila sudah terbaru / tak terpasang).
-    setTimeout(() => checkForUpdates(false), 4000);
+    setTimeout(() => checkForUpdates(false), 5000);
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
 }
