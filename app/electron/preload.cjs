@@ -6,4 +6,6 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("sensatype", {
   isElectron: true,
   openExternal: (url) => ipcRenderer.invoke("sensatype:open-external", url),
+  // Bawa jendela app ke depan (dipakai setelah login sukses → "buka app, bukan web").
+  focus: () => ipcRenderer.invoke("sensatype:focus"),
 });

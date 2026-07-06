@@ -6,6 +6,7 @@ declare global {
     sensatype?: {
       isElectron: boolean;
       openExternal: (url: string) => Promise<boolean>;
+      focus?: () => Promise<boolean>;
     };
   }
 }

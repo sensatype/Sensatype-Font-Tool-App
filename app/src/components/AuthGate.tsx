@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { Loader2, LogIn, ExternalLink, ShieldX } from "lucide-react";
-import { authApi, isElectron, openLoginUrl, type Session } from "../auth";
+import { authApi, focusApp, isElectron, openLoginUrl, type Session } from "../auth";
 import { setUnauthorizedHandler } from "../api";
 
 // Konteks auth untuk komponen di dalam app (mis. TopBar): role + logout.
@@ -47,10 +47,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     const tick = async () => {
       try {
         const s = await authApi.session();
-        if (alive && s.authenticated) setPhase({ k: "authed", s });
+        if (alive && s.authenticated) {
+          focusApp();            // login selesai di browser → bawa app ke depan otomatis
+          setPhase({ k: "authed", s });
+        }
       } catch { /* server belum siap / belum login — coba lagi */ }
     };
-    const id = window.setInterval(tick, 2000);
+    const id = window.setInterval(tick, 1200);
     tick();
     return () => { alive = false; clearInterval(id); };
   }, [phase.k]);

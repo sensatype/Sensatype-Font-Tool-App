@@ -40,6 +40,11 @@ export function openLoginUrl(url: string): void {
   else window.location.href = url;
 }
 
+// Bawa aplikasi Electron ke depan (dipakai setelah login sukses agar app terbuka, bukan web).
+export function focusApp(): void {
+  window.sensatype?.focus?.();
+}
+
 // Peta role → kapabilitas UI. Samakan dgn ADMIN_ROLES di server/auth.py.
 export const ADMIN_ROLES = ["admin", "atasan"];
 export const can = {

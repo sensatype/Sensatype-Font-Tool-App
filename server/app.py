@@ -135,7 +135,7 @@ async def auth_callback_loopback(code: str | None = None, state: str | None = No
     except HTTPException as e:
         return HTMLResponse(_callback_page("Login gagal", str(e.detail)), status_code=e.status_code)
     return HTMLResponse(
-        _callback_page("Login berhasil", "Anda bisa menutup jendela ini dan kembali ke aplikasi."))
+        _callback_page("Login berhasil", "Aplikasi akan terbuka otomatis — jendela ini boleh ditutup."))
 
 
 @app.get("/api/auth/session")

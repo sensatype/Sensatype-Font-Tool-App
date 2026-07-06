@@ -130,6 +130,18 @@ function createWindow() {
   });
 }
 
+// Bawa jendela app ke depan (dipanggil renderer saat login selesai) — user tak perlu
+// pindah manual dari browser ke app; app "terbuka sendiri".
+ipcMain.handle("sensatype:focus", () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  try { app.focus({ steal: true }); } catch { /* steal hanya di macOS */ }
+  return true;
+});
+
 // Buka URL login di browser sistem (dipanggil renderer via preload). Hanya http(s).
 ipcMain.handle("sensatype:open-external", (_e, url) => {
   try {
