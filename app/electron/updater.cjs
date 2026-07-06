@@ -96,13 +96,20 @@ function showProgress(label) {
   progressWin.on("closed", () => { progressWin = null; });
 }
 function setProgress(pct) {
-  if (progressWin && !progressWin.isDestroyed()) {
-    progressWin.webContents.executeJavaScript(`window.setPct&&window.setPct(${Number(pct) || 0})`).catch(() => {});
-  }
+  try {
+    const wc = progressWin && !progressWin.isDestroyed() ? progressWin.webContents : null;
+    if (wc && !wc.isDestroyed()) {
+      wc.executeJavaScript(`window.setPct&&window.setPct(${Number(pct) || 0})`).catch(() => {});
+    }
+  } catch { /* jendela progres sedang ditutup — abaikan */ }
 }
 function closeProgress() {
   if (progressWin && !progressWin.isDestroyed()) { try { progressWin.close(); } catch { /* ok */ } }
   progressWin = null;
+}
+// Set bar progres di taskbar/Dock dengan AMAN (jendela bisa sudah hancur saat update).
+function safeBar(win, v) {
+  try { if (win && !win.isDestroyed()) win.setProgressBar(v); } catch { /* jendela hancur — abaikan */ }
 }
 
 // macOS: unduh .dmg sendiri → pasang → restart. Tanpa browser, tanpa pilih file.
@@ -150,15 +157,15 @@ async function macUpdate(manual) {
   showProgress(`Mengunduh pembaruan ${latest}…`);
   const dmgPath = path.join(os.tmpdir(), `sensatype-update-${latest}.dmg`);
   try {
-    await download(asset.browser_download_url, dmgPath, (f) => { setProgress(f * 100); if (win) win.setProgressBar(f); });
+    await download(asset.browser_download_url, dmgPath, (f) => { setProgress(f * 100); safeBar(win, f); });
   } catch (e) {
     closeProgress();
-    if (win) win.setProgressBar(-1);
+    safeBar(win, -1);
     dialog.showMessageBox({ type: "warning", message: "Unduh pembaruan gagal", detail: String(e.message || e) });
     return;
   }
   closeProgress();
-  if (win) win.setProgressBar(-1);
+  safeBar(win, -1);
 
   // Skrip installer: tunggu app keluar → mount → ganti bundle → hapus karantina → relaunch.
   const script = `#!/bin/bash
@@ -203,18 +210,18 @@ function checkWin(manual) {
     try { new Notification({ title: "Sensatype Font Tool", body: `Versi baru ${info.version} — mengunduh…` }).show(); } catch { /* ok */ }
     showProgress(`Mengunduh pembaruan ${info.version}…`);
   });
-  autoUpdater.on("download-progress", (p) => { const pct = p.percent || 0; setProgress(pct); if (win) win.setProgressBar(pct / 100); });
+  autoUpdater.on("download-progress", (p) => { const pct = p.percent || 0; setProgress(pct); safeBar(win, pct / 100); });
   autoUpdater.on("update-not-available", () => {
     if (manual) dialog.showMessageBox({ type: "info", message: "Sudah versi terbaru", detail: `Versi ${app.getVersion()}` });
   });
   autoUpdater.on("error", (err) => {
     closeProgress();
-    if (win) win.setProgressBar(-1);
+    safeBar(win, -1);
     if (manual) dialog.showMessageBox({ type: "warning", message: "Gagal memeriksa pembaruan", detail: String((err && err.message) || err) });
   });
   autoUpdater.on("update-downloaded", async (info) => {
     closeProgress();
-    if (win) win.setProgressBar(-1);
+    safeBar(win, -1);
     const r = await dialog.showMessageBox({
       type: "info", buttons: ["Pasang & mulai ulang", "Nanti"], defaultId: 0, cancelId: 1,
       message: `Pembaruan ${info.version} siap dipasang`,

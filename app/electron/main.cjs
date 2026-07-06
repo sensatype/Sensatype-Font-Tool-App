@@ -14,6 +14,11 @@ const http = require("node:http");
 const path = require("node:path");
 const { checkForUpdates } = require("./updater.cjs");
 
+// Jaring pengaman: error latar (mis. updater) TAK BOLEH memunculkan dialog crash Electron
+// atau mematikan aplikasi. Cukup catat — app tetap jalan.
+process.on("uncaughtException", (e) => { console.error("[uncaughtException]", e); });
+process.on("unhandledRejection", (e) => { console.error("[unhandledRejection]", e); });
+
 const BACKEND_PORT = 8000;
 const BACKEND_ORIGIN = `http://127.0.0.1:${BACKEND_PORT}`;
 const REPO_ROOT = path.join(__dirname, "..", ".."); // app/electron → root repo (mode dev)
