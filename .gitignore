@@ -1,0 +1,28 @@
+# dependensi & hasil build
+.venv/
+app/node_modules/
+app/dist/
+app/release/
+backend-dist/
+/build/
+__pycache__/
+server/__pycache__/
+engine/__pycache__/
+*.pyc
+
+# log & OS
+*.log
+.DS_Store
+
+# rahasia / setelan lokal
+.env
+.env.*
+.claude/settings.local.json
+
+# data & font IP ASLI — JANGAN masuk repo publik
+server/projects/
+server/workspace/
+svg/
+
+# cache build TS
+*.tsbuildinfo

@@ -1,0 +1,8 @@
+# Sensatype Font Tool — local API (Fase 3)
+# Jembatan browser (React/Vite) -> engine Python. Lihat PRD §6.
+fastapi
+uvicorn[standard]
+python-multipart
+pymupdf   # import PDF specimen → SVG (teks jadi outline; bawa MuPDF sendiri, tanpa binari sistem)
+httpx     # klien HTTP ke backend Sensatype (app-auth: token/refresh/verify/logout)
+keyring   # simpan token OAuth di OS keyring (Keychain macOS) — tak pernah di file/log

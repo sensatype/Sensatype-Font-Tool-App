@@ -1,0 +1,7 @@
+# Sensatype Font Tool — engine dependencies (Fase 1)
+# Pin major libs; fontmake pulls in fontTools/ufoLib2/cu2qu transitively.
+fontmake
+fonttools[woff]   # brotli + zopfli for WOFF2/WOFF compression
+ufoLib2
+picosvg
+skia-pathops

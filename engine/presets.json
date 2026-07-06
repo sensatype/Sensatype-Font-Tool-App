@@ -1,0 +1,46 @@
+{
+  "_comment": "Preset awal Sensatype (slot 'preset' PRD D6). Nilai = SEED untuk ditune; finishing manual. area = 'color'/kerapatan (naik=lebih renggang); depth = % xHeight kedalaman ukur counter; over = % overshoot. reference per kategori = glyph patokan zona vertikal HTLS (spasi konsisten dlm kategori).",
+  "default": "display-serif",
+  "presets": {
+    "display-serif": {
+      "label": "High-contrast serif display (mis. Yoruna Didone)",
+      "htls": { "area": 380, "depth": 12, "over": 0 },
+      "kern": { "deadband": 8 },
+      "categories": {
+        "uppercase": { "reference": "H" },
+        "lowercase": { "reference": "n" },
+        "figures":   { "reference": "zero" }
+      }
+    },
+    "text-serif": {
+      "label": "Text serif",
+      "htls": { "area": 420, "depth": 15, "over": 0 },
+      "kern": { "deadband": 8 },
+      "categories": {
+        "uppercase": { "reference": "H" },
+        "lowercase": { "reference": "n" },
+        "figures":   { "reference": "zero" }
+      }
+    },
+    "text-sans": {
+      "label": "Text sans",
+      "htls": { "area": 440, "depth": 18, "over": 0 },
+      "kern": { "deadband": 8 },
+      "categories": {
+        "uppercase": { "reference": "H" },
+        "lowercase": { "reference": "n" },
+        "figures":   { "reference": "zero" }
+      }
+    },
+    "display-sans": {
+      "label": "Sans display",
+      "htls": { "area": 400, "depth": 12, "over": 0 },
+      "kern": { "deadband": 8 },
+      "categories": {
+        "uppercase": { "reference": "H" },
+        "lowercase": { "reference": "n" },
+        "figures":   { "reference": "zero" }
+      }
+    }
+  }
+}
