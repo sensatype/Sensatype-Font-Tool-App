@@ -65,8 +65,13 @@ async function ensureBackend() {
     cmd = path.join(process.resourcesPath, "backend", bin);
     args = ["--host", "127.0.0.1", "--port", String(BACKEND_PORT)];
     cwd = process.resourcesPath;
-    // Data project HARUS di lokasi yang bisa ditulis (di dalam bundle app = read-only).
+    // engine/ & UI dist dikirim sebagai FILE NYATA di resources/ (bukan dibekukan ke bundle),
+    // jadi resolusi __file__ modul engine + data JSON-nya tetap benar.
+    env.SENSATYPE_ENGINE_DIR = path.join(process.resourcesPath, "engine");
+    env.SENSATYPE_DIST_DIR = path.join(process.resourcesPath, "dist");
+    // Data yang bisa berubah HARUS di lokasi writable (di dalam bundle app = read-only).
     env.SENSATYPE_PROJECTS_DIR = path.join(app.getPath("userData"), "projects");
+    env.SENSATYPE_LEGACY_WORKSPACE = path.join(app.getPath("userData"), "workspace");
   } else {
     // Mode dev: pakai uvicorn dari .venv repo.
     cmd = process.platform === "win32"

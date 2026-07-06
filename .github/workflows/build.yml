@@ -1,0 +1,57 @@
+name: Build & Release
+
+# Picu rilis dengan mendorong tag versi, mis:
+#   (naikkan "version" di app/package.json lalu)
+#   git tag v0.2.0 && git push origin v0.2.0
+# Atau jalankan manual dari tab Actions (workflow_dispatch) untuk uji build tanpa publish.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest      # .dmg (Apple Silicon)
+            ebflag: "--mac"
+            selftest: "./backend-dist/sensatype-backend/sensatype-backend --selftest"
+          - os: windows-latest     # .exe (NSIS)
+            ebflag: "--win"
+            selftest: ".\\backend-dist\\sensatype-backend\\sensatype-backend.exe --selftest"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Backend Python beku (PyInstaller) ──────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend deps + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r server/requirements.txt -r engine/requirements.txt pyinstaller
+      - name: Freeze backend
+        run: pyinstaller --noconfirm --distpath backend-dist --workpath build/pyi backend.spec
+      - name: Selftest frozen backend
+        run: ${{ matrix.selftest }}
+
+      # ── Shell Electron + installer (electron-builder) ──────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install UI deps
+        working-directory: app
+        run: npm ci
+      - name: Build UI + package + publish ke GitHub Releases
+        working-directory: app
+        # GITHUB_TOKEN otomatis punya izin tulis Releases di repo ini.
+        # electron-builder mengunggah artefak + latest.yml (Windows) ke DRAFT release
+        # bernama versi tsb; publikasikan draft-nya agar auto-update Windows aktif.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm run build
+          npx electron-builder ${{ matrix.ebflag }} --publish always

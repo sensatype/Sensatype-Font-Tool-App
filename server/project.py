@@ -17,7 +17,10 @@ import time
 import zipfile
 from pathlib import Path
 
-ENGINE = Path(__file__).resolve().parent.parent / "engine"
+# ENGINE bisa di-override (SENSATYPE_ENGINE_DIR) untuk aplikasi beku/terpasang, di mana
+# engine dikirim sebagai file nyata di resources/ (bukan dibekukan ke dalam bundle).
+ENGINE = Path(os.environ.get("SENSATYPE_ENGINE_DIR")
+              or (Path(__file__).resolve().parent.parent / "engine"))
 sys.path.insert(0, str(ENGINE))
 
 import ufoLib2  # noqa: E402

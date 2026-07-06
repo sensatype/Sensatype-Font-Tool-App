@@ -31,50 +31,49 @@ Aplikasi = Electron (shell) + backend Python (FastAPI/uvicorn) + UI React.
 
 ## Langkah build installer
 
-### Prasyarat (SEKALI, dan tiap kali backend berubah): bekukan backend Python
+### Prasyarat (tiap kali backend berubah): bekukan backend Python
 
-electron-builder menyalin `../backend-dist` → `resources/backend/` (lihat
-`extraResources`). Folder itu dihasilkan PyInstaller:
+electron-builder menyalin `../backend-dist/sensatype-backend` → `resources/backend/`,
+plus `engine/` → `resources/engine/` dan `app/dist` → `resources/dist/` sebagai FILE
+NYATA (lihat `extraResources`). Backend dibekukan via `backend.spec`:
 
 ```bash
 # di root repo, dalam .venv MacBook (BUKAN Mac Mini server)
 pip install pyinstaller
-pyinstaller --noconfirm --clean \
-  --name sensatype-backend \
-  --collect-all fontmake --collect-all fontTools --collect-all ufoLib2 \
-  --collect-all picosvg --collect-all fontMath --collect-all booleanOperations \
-  --collect-all cu2qu --collect-all glyphsLib --collect-all fitz --collect-all uvicorn \
-  --collect-submodules keyring \
-  --add-data "engine:engine" \
-  --paths engine \
-  --distpath backend-dist \
-  server/_run.py
+pyinstaller --noconfirm --distpath backend-dist --workpath build/pyi backend.spec
+# validasi bundle (fontmake/PyMuPDF/skia-pathops):
+./backend-dist/sensatype-backend/sensatype-backend --selftest
 ```
 
-Sesuaikan `--collect-all/--add-data` bila ada modul/data yang belum terbawa
-(uji `backend-dist/sensatype-backend/sensatype-backend --port 8000` lalu buka
-`/api/health`). Catatan: PyInstaller TIDAK cross-compile — .exe Windows harus
-dibekukan di mesin/CI Windows.
+engine/ SENGAJA tidak dibekukan ke dalam bundle (dikirim sbg file nyata) supaya
+resolusi `__file__` modul engine + data JSON-nya tetap benar. Server menemukannya
+lewat env `SENSATYPE_ENGINE_DIR`/`SENSATYPE_DIST_DIR` yang di-set `main.cjs` di mode
+terpasang. PyInstaller TIDAK cross-compile — .exe Windows harus dibekukan di Windows.
 
-### macOS (.dmg) — di MacBook
+### macOS (.dmg) — di MacBook (TERUJI)
 
 ```bash
-cd app && npm run dist:mac      # hasil di app/release/*.dmg
+cd app && npm run dist:mac      # hasil di app/release/*.dmg (arm64)
 ```
 
-### Windows (.exe) — di mesin/CI Windows
+### Windows (.exe) — otomatis via GitHub Actions
 
-Freeze backend di Windows (langkah di atas, `--distpath backend-dist`), lalu:
+PyInstaller tak bisa cross-compile dari Mac, jadi `.exe` dibangun di CI
+(`.github/workflows/build.yml`, runner `windows-latest`).
 
-```bash
-cd app && npm run dist:win      # hasil di app/release/*.exe (NSIS)
-```
+### Rilis (mac .dmg + win .exe sekaligus, untuk auto-update)
 
-### Publish rilis (untuk update otomatis)
+1. Naikkan `version` di `app/package.json` (mis. `0.2.0`).
+2. Tag & push:
+   ```bash
+   git commit -am "rilis v0.2.0" && git tag v0.2.0 && git push origin main v0.2.0
+   ```
+3. Workflow membangun **macOS (.dmg)** + **Windows (.exe + latest.yml)** dan
+   mengunggahnya ke **draft release** bernama versi itu.
+4. Buka tab Releases → **publish** draft-nya. Setelah publish, auto-update Windows
+   aktif; macOS melihat versi baru & menawarkan unduh `.dmg`.
 
-```bash
-cd app && GH_TOKEN=<token> npm run release   # build + unggah ke GitHub Releases
-```
+> Uji build tanpa publish: jalankan workflow manual (tab Actions → Run workflow).
 
 ## Nama & ikon
 

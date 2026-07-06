@@ -8,6 +8,7 @@ Jembatan browser (React/Vite) -> engine Python. Jalankan:
 from __future__ import annotations
 
 import html
+import os
 import time
 
 from pathlib import Path
@@ -195,8 +196,8 @@ def get_project():
 
 @app.get("/api/layouts")
 def layouts():
-    from pathlib import Path
-    d = Path(project.root).resolve().parent.parent / "engine" / "layouts"
+    from server.project import ENGINE
+    d = ENGINE / "layouts"
     return {"layouts": sorted(p.stem for p in d.glob("*.json"))}
 
 
@@ -508,6 +509,7 @@ def export(_: dict = Depends(auth.require_role("admin", "atasan"))):
 # SPA prod: bila UI sudah di-build (app/dist), layani dari backend agar shell Electron
 # memuatnya SAME-ORIGIN dgn /api → tanpa isu CORS/CSRF, `/api` relatif tetap jalan. Dev
 # memakai Vite (proxy /api). Mount TERAKHIR (catch-all "/") agar tak menaungi rute /api.
-_DIST = Path(__file__).resolve().parent.parent / "app" / "dist"
+_DIST = Path(os.environ.get("SENSATYPE_DIST_DIR")
+             or (Path(__file__).resolve().parent.parent / "app" / "dist"))
 if _DIST.exists():
     app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="spa")
