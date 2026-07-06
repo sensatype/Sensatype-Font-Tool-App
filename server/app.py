@@ -356,6 +356,20 @@ class Outline(BaseModel):
     recompile: bool = True
 
 
+class Simplify(BaseModel):
+    tolerance: float = 3
+    recompile: bool = False
+
+
+@app.post("/api/glyph/{name}/simplify")
+def glyph_simplify(name: str, body: Simplify):
+    """Rapikan node/handle glyph (hapus titik berlebih, bentuk dipertahankan)."""
+    try:
+        return project.simplify_glyph(name, tolerance=body.tolerance, recompile=body.recompile)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, f"Rapikan gagal: {e}")
+
+
 @app.patch("/api/glyph/{name}/outline")
 def outline(name: str, body: Outline):
     try:
@@ -422,6 +436,20 @@ def kern(body: Kern):
         return project.set_kerning(body.left, body.right, body.value, scope=body.scope, recompile=body.recompile)
     except (ValueError, KeyError) as e:
         raise HTTPException(400, f"Kerning gagal: {e}")
+
+
+class KernShift(BaseModel):
+    delta: int
+    recompile: bool = False
+
+
+@app.post("/api/kerning/shift-all")
+def kern_shift_all(body: KernShift):
+    """Geser SEMUA nilai kerning tersimpan (bake permanen — scope 'Semuanya')."""
+    try:
+        return project.shift_all_kerning(body.delta, recompile=body.recompile)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Geser semua kerning gagal: {e}")
 
 
 class AutoKern(BaseModel):

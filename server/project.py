@@ -32,6 +32,7 @@ import kerning as kerning_mod  # noqa: E402
 import presets as presets_mod  # noqa: E402
 import specimen_split  # noqa: E402
 import features as features_mod  # noqa: E402
+import simplify as simplify_mod  # noqa: E402
 
 # WORKSPACE = project "lama" (satu-project). Kini jadi CADANGAN + sumber migrasi ke pustaka.
 # PROJECTS_ROOT = pustaka multi-project (model device-per-user). Keduanya bisa di-override env
@@ -769,6 +770,21 @@ class Project:
         return {"left": left, "right": right, "value": int(v)}
 
     @_locked
+    def shift_all_kerning(self, delta, recompile=False):
+        """Geser SEMUA nilai kerning tersimpan sebesar `delta` (em) — bake permanen, tanpa
+        terkecuali (scope 'Semuanya' di UI). Nilai baru terlihat di daftar kerning & ikut export."""
+        font = self._font()
+        d = int(delta)
+        if not d:
+            return {"shifted": 0, "kerning": len(font.kerning)}
+        for k in list(font.kerning.keys()):
+            font.kerning[k] = int(font.kerning[k]) + d
+        font.save(self.ufo_path, overwrite=True)
+        if recompile:
+            self.compile_static()
+        return {"shifted": len(font.kerning), "kerning": len(font.kerning)}
+
+    @_locked
     def auto_kern_all(self, only_empty=True, recompile=True):
         """Auto-kern optikal SELURUH pasangan huruf & angka (ASCII, glyph-level).
         only_empty=True (default) → HANYA mengisi pasangan yang belum punya kerning apa pun
@@ -1136,6 +1152,19 @@ class Project:
         if recompile:
             self.compile_static()
         return self.glyph_svg(name)
+
+    def simplify_glyph(self, name, tolerance=3.0, recompile=False):
+        """Rapikan node/handle glyph: hapus titik yang tak dibutuhkan TANPA merusak bentuk
+        (toleransi = simpangan maks, unit em). Algoritma di engine/simplify.py; penulisan
+        via set_outline (ter-lock, respons sama dgn editor node → UI langsung sinkron)."""
+        font = self._font()
+        if name not in font:
+            raise KeyError(name)
+        g = font[name]
+        contours = [[{"x": p.x, "y": p.y, "type": (p.type or "offcurve"), "smooth": bool(p.smooth)}
+                     for p in c] for c in g]
+        slim = simplify_mod.simplify_contours(contours, tolerance=float(tolerance))
+        return self.set_outline(name, slim, recompile=recompile)
 
     @_locked
     def set_components(self, name, components, recompile=True):

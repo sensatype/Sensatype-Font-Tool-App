@@ -102,6 +102,14 @@ export const api = {
       body: JSON.stringify({ ...body, recompile: false }),
     }).then(j<{ ascender: number; descender: number; capHeight: number; xHeight: number }>),
 
+  // Rapikan node/handle: hapus titik berlebih, bentuk dipertahankan (toleransi = simpangan maks, em)
+  simplifyGlyph: (name: string, tolerance: number) =>
+    fetch(`${BASE}/glyph/${encodeURIComponent(name)}/simplify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tolerance, recompile: false }),
+    }).then(j<GlyphDetail>),
+
   setOutline: (name: string, contours: ContourPoint[][]) =>
     fetch(`${BASE}/glyph/${encodeURIComponent(name)}/outline`, {
       method: "PATCH",
@@ -135,6 +143,13 @@ export const api = {
   smartKern: (left: string, right: string) =>
     fetch(`${BASE}/kerning/smart?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`)
       .then(j<{ left: string; right: string; value: number }>),
+
+  // Geser SEMUA nilai kerning tersimpan sebesar delta (bake permanen — scope "Semuanya").
+  shiftAllKern: (delta: number) =>
+    fetch(`${BASE}/kerning/shift-all`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delta, recompile: false }),
+    }).then(j<{ shifted: number; kerning: number }>),
 
   // Auto-kern optikal SELURUH pasangan huruf & angka. onlyEmpty → tak menimpa yang sudah ada.
   autoKernAll: (onlyEmpty = true) =>

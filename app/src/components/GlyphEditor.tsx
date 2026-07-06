@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Move, Spline, Square, Circle, Trash2, ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Magnet,
   Boxes, Ruler, ArrowLeftRight, Type, MousePointer2,
   FlipHorizontal2, FlipVertical2, RotateCcw, RotateCw, Anchor as AnchorIcon,
-  Copy, Group, Ungroup, Combine, Loader2, Crosshair, Grid3x3, Moon, Sun, Check, X, Sparkles } from "lucide-react";
+  Copy, Group, Ungroup, Combine, Loader2, Crosshair, Grid3x3, Moon, Sun, Check, X, Sparkles, Wand2 } from "lucide-react";
 import { api } from "../api";
 import { contoursToPath, addNode, removeNode, segClosest } from "../outline";
 import type { Anchor, ContourPoint, Glyph, GlyphComponent, GlyphDetail, GlyphRender, KernInfo } from "../types";
@@ -10,13 +10,14 @@ import type { Anchor, ContourPoint, Glyph, GlyphComponent, GlyphDetail, GlyphRen
 const ANCHOR_COLOR = "#e8a13a"; // warna penanda anchor (amber)
 const COMP_COLOR = "#4aa3df";   // warna komponen (biru)
 
-// 5 mode ala FontLab. Step 1: Contour & Metrics aktif; Element/Kerning/Text kerangka (read-only).
-type Mode = "contour" | "element" | "metrics" | "kerning" | "text";
+// 6 mode ala FontLab.
+type Mode = "contour" | "element" | "metrics" | "kerning" | "cleanup" | "text";
 const TOOLS: { id: Mode; label: string; icon: any; hint: string; ready: boolean }[] = [
   { id: "contour", label: "Contour", icon: Spline, hint: "Edit node, handle, kontur", ready: true },
   { id: "element", label: "Element", icon: Boxes, hint: "Pindah/transform/group elemen utuh", ready: true },
   { id: "metrics", label: "Metrics", icon: Ruler, hint: "Advance & sidebearing", ready: true },
   { id: "kerning", label: "Kerning", icon: ArrowLeftRight, hint: "Atur pasangan kerning", ready: true },
+  { id: "cleanup", label: "Rapikan", icon: Wand2, hint: "Hapus node/handle berlebih — bentuk dipertahankan", ready: true },
   { id: "text", label: "Text", icon: Type, hint: "Ketik/tempel teks (proofing)", ready: true },
 ];
 // mode terakhir yang dipilih user — level modul agar SELAMAT dari remount per-glyph (key=nama)
@@ -120,6 +121,10 @@ export function GlyphEditor({
   const [smartBusy, setSmartBusy] = useState(false); // sedang menghitung saran smart kern
   const [autoBusy, setAutoBusy] = useState(false); // sedang menjalankan auto-kern seluruh font
   const [autoMenu, setAutoMenu] = useState(false); // menu pilihan auto-kern (isi kosong / timpa semua)
+  // mode Rapikan (bersihkan node/handle berlebih tanpa merusak bentuk)
+  const [cleanBusy, setCleanBusy] = useState(false);
+  const [cleanTol, setCleanTol] = useState(3);   // toleransi simpangan bentuk (unit em)
+  const [cleanMsg, setCleanMsg] = useState<string | null>(null);
   // Nilai kerning/tracking kini DITAHAN dulu (pratinjau) → baru ditulis saat tombol "Terapkan"
   // diklik. kernDirty = ada nilai tertahan yang belum ditetapkan.
   const [kernDirty, setKernDirty] = useState(false);
@@ -128,7 +133,9 @@ export function GlyphEditor({
   const smartSkipRef = useRef(false); // one-shot: bump fontV berikut berasal dari apply smart kita → jangan hitung ulang saran
   const kernInfoRef = useRef<KernInfo | null>(null); kernInfoRef.current = kernInfo;
   const pendingKern = useRef<number | null>(null); // nilai kern yg BARU kita tulis → refetch echo tak menimpa nilai live
-  const [trackVal, setTrackVal] = useState(tracking); // nilai tracking live (disinkron dari prop)
+  // scope "Semuanya" = DELTA geser semua nilai kerning tersimpan (bake). Mulai 0; pratinjau di
+  // kanvas; ditulis permanen ke SEMUA pasangan saat Terapkan (tanpa terkecuali).
+  const [trackVal, setTrackVal] = useState(0);
   useEffect(() => { setTrackVal(tracking); }, [tracking]);
   const [kernBusy, setKernBusy] = useState(false); // proses perluas group
   const [partnerData, setPartnerData] = useState<{ path: string; advance: number } | null>(null);
@@ -314,30 +321,63 @@ export function GlyphEditor({
       setAutoBusy(false);
     }
   }
+  // RAPIKAN: hapus node/handle yang tak dibutuhkan — bentuk dipertahankan (toleransi di slider).
+  // Hasil masuk histori (⌘Z membatalkan) & tersinkron ke semua mode (cache Text, grid, panel).
+  async function runCleanup() {
+    if (!name || !d || cleanBusy) return;
+    const before = contours.reduce((n, c) => n + c.length, 0);
+    setCleanBusy(true); setCleanMsg(null);
+    try {
+      const res = await serial(() => api.simplifyGlyph(name, cleanTol));
+      const after = res.outline.reduce((n, c) => n + c.length, 0);
+      setContours(res.outline); contoursRef.current = res.outline;
+      setLsb(res.lsb); setRsb(res.rsb); bbox0.current = { xMin: res.lsb, xMax: res.advance - res.rsb };
+      setD((p) => (p ? { ...p, ...res } : res));
+      syncCacheOutline(name, res.outline, res.advance);
+      pushHist({ contours: res.outline, lsb: res.lsb, rsb: res.rsb, ascender: res.ascender, descender: res.descender, capHeight: res.capHeight, xHeight: res.xHeight });
+      onChanged({ name, unicode: res.unicode, char: res.char, advance: res.advance,
+        lsb: res.lsb, rsb: res.rsb, contours: res.contours, category: res.category, empty: res.empty });
+      setCleanMsg(after < before ? `${before} → ${after} titik (−${before - after}) · ⌘Z untuk membatalkan` : "Sudah rapi — tidak ada titik berlebih pada toleransi ini");
+    } catch (e) {
+      setCleanMsg("Gagal: " + ((e as Error).message || e));
+    } finally { setCleanBusy(false); }
+  }
   // keluar dari mode Kerning dgn nilai tertahan → BUANG SEPENUHNYA: kembalikan juga kernVal &
   // guard echo. (Dulu hanya setKernDirty(false) → draft nyangkut tampil sbg "tersimpan" palsu
   // saat masuk lagi, krn refetch di-skip oleh guard pendingKern.)
   useEffect(() => {
     if (mode !== "kerning" && kernDirtyRef.current) {
-      kernDirtyRef.current = false; setKernDirty(false); setTrackVal(tracking);
+      kernDirtyRef.current = false; setKernDirty(false); setTrackVal(0);
       pendingKern.current = null;
       setKernVal(kernScoped(kernInfoRef.current, kernScopeRef.current));
     }
   }, [mode, tracking]); // eslint-disable-line react-hooks/exhaustive-deps
   // STAGE: seret kanvas / ketik angka → pratinjau live + tandai "belum ditetapkan" (tak menulis apa pun)
   function stageKern(v: number) {
-    if (kernScope === "all") { setTrackVal(v); setKernDirty(v !== tracking); return; }
+    if (kernScope === "all") { setTrackVal(v); setKernDirty(v !== 0); return; }
     setKernVal(v); setKernDirty(v !== kernScoped(kernInfoRef.current, kernScope));
   }
   // TERAPKAN: tulis nilai tertahan ke font (tracking global / kern kelas / exception pasangan)
   function applyKern() {
-    if (kernScope === "all") { onTracking?.(trackVal); setKernDirty(false); return; }
+    if (kernScope === "all") {
+      // BAKE: geser SEMUA nilai kerning tersimpan sebesar delta — permanen, tanpa terkecuali.
+      const dlt = Math.round(trackVal);
+      setKernDirty(false);
+      if (!dlt) return;
+      if (!confirm(`Geser SEMUA nilai kerning tersimpan sebesar ${dlt > 0 ? "+" : ""}${dlt}?\n\n` +
+        "Berlaku ke semua pasangan tanpa terkecuali (permanen — terlihat di daftar kerning & ikut export). " +
+        "Untuk membalikkan: terapkan nilai kebalikannya.")) return;
+      serial(() => api.shiftAllKern(dlt))
+        .then(() => { kernCache.current = {}; setTrackVal(0); onKern?.(); setProofTick((t) => t + 1); })
+        .catch((e) => alert("Geser semua gagal: " + ((e as Error).message || e)));
+      return;
+    }
     if (kernScope === "smart") smartSkipRef.current = true; // bump fontV hasil apply ini jangan memicu hitung-ulang yang menimpa nilai baru
     commitKern(kernVal); setKernDirty(false);
   }
   // BATAL: buang nilai tertahan, kembali ke nilai tersimpan
   function cancelKern() {
-    if (kernScope === "all") setTrackVal(tracking);
+    if (kernScope === "all") setTrackVal(0); // buang delta yang belum diterapkan
     else setKernVal(kernScoped(kernInfoRef.current, kernScope));
     setKernDirty(false);
   }
@@ -1055,10 +1095,9 @@ export function GlyphEditor({
       g.val = snap1(g.start + dy);
       setD((p) => (p ? { ...p, [g.key]: g.val } as GlyphDetail : p));
     } else if (g.kind === "base") {
-      const dy = -(e.clientY - g.cy) * k; // tarik ke atas → glyph naik
+      const dy = -(e.clientY - g.cy) * k; // tarik ke atas → garis naik
       g.dy = snap1(dy);
-      setBaseLineY(g.dy); // garis baseline ikut bergerak & nempel ke grid (seperti bar kiri-kanan)
-      applyContours(g.orig.map((c: ContourPoint[]) => c.map((p) => ({ ...p, y: Math.round(p.y + g.dy) }))));
+      setBaseLineY(g.dy); // HANYA garis yang bergerak saat diseret — karakter diam (komitmen di onUp)
     } else if (g.kind === "draw") {
       const s = clientToFont(e);
       let x1 = s.x, y1 = s.y;
@@ -1082,7 +1121,18 @@ export function GlyphEditor({
     else if (g.kind === "component") { if (g.moved) commitComps(compsRef.current); }
     else if (g.kind === "elemMove") { if (g.moved) commitElements(contoursRef.current, compsRef.current, g.cset.size > 0, g.mset.size > 0); }
     else if (g.kind === "elemMarquee") { setEMarq(null); if (!g.moved && !g.add) setESel(new Set()); }
-    else if (g.kind === "base") { setBaseLineY(0); if (g.dy) { setContours(contoursRef.current); commitOutline(contoursRef.current); } }
+    else if (g.kind === "base") {
+      setBaseLineY(0);
+      if (g.dy) {
+        // Baseline dipindah +dy → dalam koordinat font, karakter bergeser −dy (baseline definisi y=0).
+        // Supaya karakter DIAM secara visual, view di-pan +dy — yang tampak pindah hanya garisnya.
+        const next = contours.map((c) => c.map((p) => ({ ...p, y: Math.round(p.y - g.dy) })));
+        setContours(next); contoursRef.current = next;
+        commitOutline(next);
+        const { vh } = frameRef.current; const v = viewRef.current;
+        setView2({ ...v, fy: v.fy + g.dy / vh });
+      }
+    }
     else if (g.kind === "guide" && g.val != null) {
       commitMetric(g.key as "ascender" | "descender" | "capHeight" | "xHeight", g.val);
     } else if (g.kind === "draw") {
@@ -1324,12 +1374,12 @@ export function GlyphEditor({
                   React melewati ±ratusan <line> ini sama sekali (hot path drag tetap ringan) */}
               {showGrid && <CanvasGrid vbX={vbX} vbY={vbY} vbW={vbW} vbH={vbH} frameTop={frameTop}
                 step={snapStep} pxPer={elem.w / vbW} sw={handleStroke} minor={cv.gMinor} major={cv.gMajor} />}
-              {/* garis metrik horizontal — asc/desc/cap/x draggable di mode Metrics. BASELINE TETAP
-                  (y=0, definisi): dulu ikut draggable & diam-diam menggeser seluruh glyph → karakter
-                  "ikut bergerak lalu pindah". Geser vertikal yang DISENGAJA: kolom "Base ±" di toolbar. */}
+              {/* garis metrik horizontal — draggable di mode Metrics. BASELINE: menyeretnya mengatur
+                  POSISI BASELINE TERHADAP KARAKTER — karakter diam secara visual (data digeser −dy,
+                  view di-pan +dy: saling meniadakan), hanya garisnya yang pindah. */}
               {guides.map(([y, label, color, key]) => {
                 const isBase = key === null;
-                const dragg = mode === "metrics" && !isBase;
+                const dragg = mode === "metrics";
                 const ly = isBase ? baseLineY : y; // garis base ikut bergerak saat diseret (nempel ke grid)
                 return (
                   <g key={label} style={{ cursor: dragg ? "ns-resize" : "default" }}
@@ -1376,6 +1426,26 @@ export function GlyphEditor({
                       fill="none" stroke="var(--accent)" strokeWidth={nodeStroke} strokeDasharray={`${nodeR * 0.7} ${nodeR * 0.7}`} opacity={0.7} style={{ pointerEvents: "none" }} />; })}
                 </>
               )}
+
+              {/* mode Rapikan: tampilkan node/handle READ-ONLY — user melihat titik mana yang hilang */}
+              {mode === "cleanup" && contours.map((c, ci) => (
+                <g key={`cl${ci}`} style={{ pointerEvents: "none" }}>
+                  {c.map((p, pi) => {
+                    if (p.type !== "offcurve") return null;
+                    const n = c.length;
+                    const prev = c[(pi - 1 + n) % n], next = c[(pi + 1) % n];
+                    const lines = [];
+                    if (prev.type !== "offcurve") lines.push([prev, p] as const);
+                    if (next.type !== "offcurve") lines.push([next, p] as const);
+                    return lines.map(([a, b], li) => (
+                      <line key={`${pi}-${li}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--faint)" strokeWidth={handleStroke} />
+                    ));
+                  })}
+                  {c.map((p, pi) => p.type === "offcurve"
+                    ? <circle key={`o${pi}`} cx={p.x} cy={p.y} r={nodeR * 0.55} fill="var(--bg-2)" stroke="var(--accent)" strokeWidth={nodeStroke} />
+                    : <rect key={`n${pi}`} x={p.x - nodeR * 0.7} y={p.y - nodeR * 0.7} width={nodeR * 1.4} height={nodeR * 1.4} fill="var(--accent)" />)}
+                </g>
+              ))}
 
               {mode === "contour" && contours.map((c, ci) => (
                 <g key={ci}>
@@ -1631,12 +1701,12 @@ export function GlyphEditor({
             {/* satu field: "Semuanya"→tracking global · "Kelas"/"Pasangan"→kern pasangan.
                 Nilai DITAHAN dulu (amber = belum ditetapkan) → tulis saat "Terapkan". */}
             {kernScope === "all"
-              ? <Num label={kernDirty ? "Tracking*" : "Tracking"} value={trackVal} color={kernDirty ? "#e8a13a" : "var(--accent)"} onCommit={stageKern} title="Spasi GLOBAL (em) — berlaku ke SEMUA pasangan sekaligus; berlapis di atas kerning. + renggang, − rapat. Klik Terapkan utk menyimpan." />
+              ? <Num label={kernDirty ? "Geser semua*" : "Geser semua"} value={trackVal} color={kernDirty ? "#e8a13a" : "var(--accent)"} onCommit={stageKern} title="Geser SEMUA nilai kerning tersimpan (em) — tanpa terkecuali, permanen setelah Terapkan. + renggang, − rapat. Pratinjau di kanvas." />
               : <Num label={(kernScope === "smart" ? "Smart" : "Kern") + (kernDirty ? "*" : "")} value={kernVal} color={kernDirty ? "#e8a13a" : "var(--good)"} onCommit={stageKern} title="Nilai kern (em); + renggang, − rapat. Smart = saran optikal dari bentuk. Klik Terapkan utk menyimpan." />}
             {/* scope + nilai TERSIMPAN per level → jelas level mana yang punya nilai apa */}
-            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Semuanya = spasi global · Kelas = semua glyph se-grup · Pasangan = pasangan ini saja (exception) · Smart = saran kern optikal dari bentuk outline. Angka kecil = nilai tersimpan level itu.">
+            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Semuanya = geser semua nilai kerning sekaligus (bake permanen) · Kelas = semua glyph se-grup · Pasangan = pasangan ini saja (exception) · Smart = saran kern optikal dari bentuk outline. Angka kecil = nilai tersimpan level itu.">
               {(["all", "class", "pair", "smart"] as const).map((s) => {
-                const sv = s === "all" ? (tracking || null) : s === "class" ? kernInfo?.classValue ?? null : s === "pair" ? kernInfo?.pairValue ?? null : null;
+                const sv = s === "class" ? kernInfo?.classValue ?? null : s === "pair" ? kernInfo?.pairValue ?? null : null;
                 const label = s === "all" ? "Semuanya" : s === "class" ? "Kelas" : s === "pair" ? "Pasangan" : "Smart";
                 return (
                   <button key={s} className="text-xs px-2 py-1 rounded-md font-medium flex items-center gap-1" onClick={() => setKernScope(s)}
@@ -1702,12 +1772,28 @@ export function GlyphEditor({
                 : kernScope === "smart"
                 ? "Smart = kern optikal dari bentuk outline (lurus/bulat/menjorok/diagonal menyesuaikan). Pilih pasangan → saran muncul."
                 : kernScope === "all"
-                ? "Tracking GLOBAL → spasi seragam SEMUA pasangan, berlapis di atas kerning · ikut saat export"
+                ? "Geser SEMUA nilai kerning tersimpan sekaligus (tanpa terkecuali) — permanen setelah Terapkan"
                 : kernScope === "class"
                 ? (kernInfo?.leftGroup || kernInfo?.rightGroup
                   ? `Kelas ${(kernInfo?.leftGroup ?? kernLeft ?? "").replace("public.kern1.", "")} · ${(kernInfo?.rightGroup ?? kernRight ?? "").replace("public.kern2.", "")} → semua se-grup ikut`
                   : "Glyph ini tak punya kelas → tersimpan sbg pasangan")
                 : `Pasangan ${kernLeft}·${kernRight} saja (exception)${kernInfo?.classValue != null ? ` · kelas=${kernInfo.classValue}` : ""}`}
+            </span>
+          </>
+        ) : mode === "cleanup" ? (
+          <>
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: "var(--bg-2)", color: "var(--good)" }}>Rapikan</span>
+            <label className="flex flex-col gap-1 shrink-0" title="Simpangan bentuk maksimum (unit em) — makin besar, makin agresif menghapus titik">
+              <span className="label">Toleransi {cleanTol}</span>
+              <input type="range" min={1} max={15} value={cleanTol} onChange={(e) => setCleanTol(Number(e.target.value))} className="w-28" />
+            </label>
+            <button className="btn btn-accent !py-1.5" onClick={runCleanup} disabled={cleanBusy}
+              title="Hapus node/handle yang tidak dibutuhkan — bentuk karakter dipertahankan (dalam toleransi). ⌘Z membatalkan.">
+              {cleanBusy ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}Rapikan node
+            </button>
+            <span className="text-xs tabular-nums text-muted shrink-0">{contours.reduce((n, c) => n + c.length, 0)} titik</span>
+            <span className="text-xs ml-auto whitespace-nowrap hidden lg:block" style={{ color: cleanMsg?.startsWith("Gagal") ? "#e5654b" : "var(--faint)" }}>
+              {cleanMsg ?? "Sistem menghapus node/handle yang tak dibutuhkan tanpa merusak bentuk — mulai dari toleransi kecil"}
             </span>
           </>
         ) : mode === "text" ? (
