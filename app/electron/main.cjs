@@ -90,7 +90,8 @@ async function ensureBackend() {
     windowsHide: true,
   });
   backendProc.on("exit", (code) => { console.log("[backend] keluar", code); backendProc = null; });
-  return waitFor(`${BACKEND_ORIGIN}/api/health`, 20000);
+  // Terpasang: cold-start backend beku bisa lama (scan Gatekeeper first-run) → beri waktu lebih.
+  return waitFor(`${BACKEND_ORIGIN}/api/health`, app.isPackaged ? 60000 : 20000);
 }
 
 // Menu aplikasi — sertakan "Periksa Pembaruan…" (manual) selain standar edit/view/window.
@@ -124,7 +125,15 @@ function createWindow() {
   });
   mainWindow.once("ready-to-show", () => mainWindow.show());
   // Dev: Vite (HMR). Prod: SPA dilayani backend (same-origin dgn /api).
-  mainWindow.loadURL(RENDERER_URL || BACKEND_ORIGIN);
+  const appUrl = RENDERER_URL || BACKEND_ORIGIN;
+  mainWindow.loadURL(appUrl);
+  // Jika halaman gagal dimuat (backend belum siap sesaat setelah update/cold-start) →
+  // coba muat ulang otomatis sampai backend melayani. Cegah jendela "kosong".
+  mainWindow.webContents.on("did-fail-load", (_e, _code, _desc, _url, isMainFrame) => {
+    if (isMainFrame && mainWindow && !mainWindow.isDestroyed()) {
+      setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(appUrl); }, 900);
+    }
+  });
   // Semua link http(s) → browser sistem; tak ada jendela app baru.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);

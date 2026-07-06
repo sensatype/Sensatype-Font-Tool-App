@@ -136,6 +136,13 @@ export const api = {
     fetch(`${BASE}/kerning/smart?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`)
       .then(j<{ left: string; right: string; value: number }>),
 
+  // Auto-kern optikal SELURUH pasangan huruf & angka. onlyEmpty → tak menimpa yang sudah ada.
+  autoKernAll: (onlyEmpty = true) =>
+    fetch(`${BASE}/kerning/auto`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ onlyEmpty, recompile: false }),
+    }).then(j<{ candidates: number; computed: number; written: number; skipped: number }>),
+
   setKerning: (body: { left: string; right: string; value: number; scope?: "class" | "pair"; recompile?: boolean }) =>
     fetch(`${BASE}/kerning`, {
       method: "PUT",

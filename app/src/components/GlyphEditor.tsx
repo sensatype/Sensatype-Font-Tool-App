@@ -112,6 +112,7 @@ export function GlyphEditor({
   const [kernInfo, setKernInfo] = useState<KernInfo | null>(null); // hasil resolusi (grup/exception)
   const [kernScope, setKernScope] = useState<"all" | "class" | "pair" | "smart">("class"); // Semuanya(tracking)/Kelas/Pasangan/Smart
   const [smartBusy, setSmartBusy] = useState(false); // sedang menghitung saran smart kern
+  const [autoBusy, setAutoBusy] = useState(false); // sedang menjalankan auto-kern seluruh font
   // Nilai kerning/tracking kini DITAHAN dulu (pratinjau) → baru ditulis saat tombol "Terapkan"
   // diklik. kernDirty = ada nilai tertahan yang belum ditetapkan.
   const [kernDirty, setKernDirty] = useState(false);
@@ -259,6 +260,25 @@ export function GlyphEditor({
     finally { setSmartBusy(false); }
   }, [kernLeft, kernRight, glyphNames]);
   useEffect(() => { if (mode === "kerning" && kernScope === "smart" && !kernDirtyRef.current) computeSmart(); }, [kernScope, mode, computeSmart, fontV]);
+  // AUTO-KERN SELURUH FONT: hitung + terapkan kern optikal utk semua pasangan huruf/angka.
+  // AMAN: hanya MENGISI pasangan yang belum punya kerning (yang sudah diatur tak diubah).
+  async function runAutoKernAll() {
+    if (autoBusy) return;
+    if (!confirm(
+      "Auto-kern optikal SELURUH pasangan huruf & angka?\n\n" +
+      "Hanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah. " +
+      "Bisa memakan beberapa detik.")) return;
+    setAutoBusy(true);
+    try {
+      const r = await serial(() => api.autoKernAll(true));
+      onKern?.(); // bump editV → panel & webfont menyusul
+      alert(`Auto-kern selesai:\n${r.written} pasangan ditulis · ${r.skipped} dilewati (sudah ada)\ndari ${r.candidates} glyph huruf/angka.`);
+    } catch (e) {
+      alert("Auto-kern gagal: " + ((e as Error).message || e));
+    } finally {
+      setAutoBusy(false);
+    }
+  }
   // keluar dari mode Kerning dgn nilai tertahan → buang (kembali ke tersimpan)
   useEffect(() => { if (mode !== "kerning" && kernDirtyRef.current) { setKernDirty(false); setTrackVal(tracking); } }, [mode, tracking]);
   // STAGE: seret kanvas / ketik angka → pratinjau live + tandai "belum ditetapkan" (tak menulis apa pun)
@@ -1583,6 +1603,12 @@ export function GlyphEditor({
               <button className="btn !py-1.5" onClick={computeSmart} disabled={smartBusy}
                 title="Hitung ulang saran Smart (kern optikal dari bentuk outline) untuk pasangan ini">
                 {smartBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Hitung ulang
+              </button>
+            )}
+            {kernScope === "smart" && (
+              <button className="btn btn-accent !py-1.5" onClick={runAutoKernAll} disabled={autoBusy}
+                title="Auto-kern optikal SELURUH pasangan huruf & angka sekaligus (aman: hanya mengisi yang belum ada)">
+                {autoBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Auto-kern semua
               </button>
             )}
             <button className="btn !py-1.5" onClick={expandKernClasses} disabled={kernBusy}

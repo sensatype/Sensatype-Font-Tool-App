@@ -767,6 +767,40 @@ class Project:
         return {"left": left, "right": right, "value": int(v)}
 
     @_locked
+    def auto_kern_all(self, only_empty=True, recompile=True):
+        """Auto-kern optikal SELURUH pasangan huruf & angka (ASCII, glyph-level).
+        only_empty=True (default) → HANYA mengisi pasangan yang belum punya kerning apa pun
+        (glyph maupun lewat grup) → kerning manual/kelas yang sudah ada TIDAK ditimpa (aman)."""
+        font = self._font()
+        upm = font.info.unitsPerEm or 1000
+        # Kandidat dibatasi ke huruf & angka ASCII (A–Z a–z 0–9) agar tak meledak (n²).
+        # Varian aksen ikut lewat "Perluas kelas".
+        names = []
+        for n in font.glyphOrder:
+            if n == ".notdef" or n not in font:
+                continue
+            u = font[n].unicode
+            if u and (0x41 <= u <= 0x5A or 0x61 <= u <= 0x7A or 0x30 <= u <= 0x39):
+                names.append(n)
+        pairs = kerning_mod.auto_kern_pairs(font, names, upm=upm)
+        g1, g2 = self._kern_groups(font)
+        written = skipped = 0
+        for (L, R), v in pairs.items():
+            if only_empty:
+                lg, rg = g1.get(L), g2.get(R)
+                keys = [(L, R)] + ([(lg, R)] if lg else []) + ([(L, rg)] if rg else []) + ([(lg, rg)] if lg and rg else [])
+                if any(k in font.kerning for k in keys):
+                    skipped += 1
+                    continue
+            font.kerning[(L, R)] = v
+            written += 1
+        if written:
+            font.save(self.ufo_path, overwrite=True)
+            if recompile:
+                self.compile_static()
+        return {"candidates": len(names), "computed": len(pairs), "written": written, "skipped": skipped}
+
+    @_locked
     def expand_kern_groups(self):
         """Gabungkan varian aksen ke kelas kern huruf dasarnya (À,Á,Â… → kelas A, sisi kiri & kanan)
         via dekomposisi Unicode NFD. Kerning di-rekey (nilai DASAR menang). §9.6 (level kelas)."""

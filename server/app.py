@@ -424,6 +424,20 @@ def kern(body: Kern):
         raise HTTPException(400, f"Kerning gagal: {e}")
 
 
+class AutoKern(BaseModel):
+    onlyEmpty: bool = True   # True = hanya isi pasangan yang belum ada kerning (tak menimpa)
+    recompile: bool = False
+
+
+@app.post("/api/kerning/auto")
+def kern_auto(body: AutoKern):
+    """Auto-kern optikal seluruh pasangan huruf & angka (sadar-bentuk). Aman: onlyEmpty=True."""
+    try:
+        return project.auto_kern_all(only_empty=body.onlyEmpty, recompile=body.recompile)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Auto-kern gagal: {e}")
+
+
 @app.post("/api/preview/recompile")
 def preview_recompile():
     return project.recompile_preview()

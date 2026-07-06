@@ -75,6 +75,36 @@ function download(url, dest, onProgress, redirects = 0) {
 
 const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'"; // kutip aman utk /bin/bash
 
+// ── Pop-up progres unduhan (persentase) ────────────────────────────────────────
+let progressWin = null;
+function showProgress(label) {
+  closeProgress();
+  progressWin = new BrowserWindow({
+    width: 400, height: 150, resizable: false, minimizable: false, maximizable: false,
+    fullscreenable: false, alwaysOnTop: true, skipTaskbar: true, title: "Pembaruan",
+    backgroundColor: "#14171d", webPreferences: { contextIsolation: true, sandbox: false },
+  });
+  progressWin.setMenuBarVisibility(false);
+  const safe = String(label).replace(/[<&]/g, "");
+  const html = `<!doctype html><meta charset="utf-8"><body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#14171d;color:#e6e8ec;display:flex;flex-direction:column;justify-content:center;padding:20px 22px;gap:12px;user-select:none">
+<div style="font-size:13px;font-weight:500">${safe}</div>
+<div style="height:8px;background:#2a2f3a;border-radius:99px;overflow:hidden"><div id="bar" style="height:100%;width:0%;background:#4f8cff;transition:width .15s"></div></div>
+<div id="pct" style="font-size:12px;color:#8b93a1;text-align:right">0%</div>
+<script>window.setPct=function(p){var v=Math.max(0,Math.min(100,Math.round(p)));document.getElementById('bar').style.width=v+'%';document.getElementById('pct').textContent=v+'%';};</script>
+</body>`;
+  progressWin.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+  progressWin.on("closed", () => { progressWin = null; });
+}
+function setProgress(pct) {
+  if (progressWin && !progressWin.isDestroyed()) {
+    progressWin.webContents.executeJavaScript(`window.setPct&&window.setPct(${Number(pct) || 0})`).catch(() => {});
+  }
+}
+function closeProgress() {
+  if (progressWin && !progressWin.isDestroyed()) { try { progressWin.close(); } catch { /* ok */ } }
+  progressWin = null;
+}
+
 // macOS: unduh .dmg sendiri → pasang → restart. Tanpa browser, tanpa pilih file.
 async function macUpdate(manual) {
   let rel;
@@ -116,16 +146,18 @@ async function macUpdate(manual) {
   });
   if (r.response !== 0) return;
 
-  try { new Notification({ title: "Sensatype Font Tool", body: `Mengunduh pembaruan ${latest}…` }).show(); } catch { /* ok */ }
   const win = BrowserWindow.getAllWindows()[0] || null;
+  showProgress(`Mengunduh pembaruan ${latest}…`);
   const dmgPath = path.join(os.tmpdir(), `sensatype-update-${latest}.dmg`);
   try {
-    await download(asset.browser_download_url, dmgPath, (f) => { if (win) win.setProgressBar(f); });
+    await download(asset.browser_download_url, dmgPath, (f) => { setProgress(f * 100); if (win) win.setProgressBar(f); });
   } catch (e) {
+    closeProgress();
     if (win) win.setProgressBar(-1);
     dialog.showMessageBox({ type: "warning", message: "Unduh pembaruan gagal", detail: String(e.message || e) });
     return;
   }
+  closeProgress();
   if (win) win.setProgressBar(-1);
 
   // Skrip installer: tunggu app keluar → mount → ganti bundle → hapus karantina → relaunch.
@@ -166,19 +198,22 @@ function checkWin(manual) {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.removeAllListeners();
   const win = BrowserWindow.getAllWindows()[0] || null;
-  // Beri tahu saat versi baru mulai diunduh (biar tak terasa 'tak ada update').
+  // Beri tahu + tampilkan pop-up persentase saat versi baru mulai diunduh.
   autoUpdater.on("update-available", (info) => {
-    try { new Notification({ title: "Sensatype Font Tool", body: `Versi baru ${info.version} — mengunduh di latar…` }).show(); } catch { /* ok */ }
+    try { new Notification({ title: "Sensatype Font Tool", body: `Versi baru ${info.version} — mengunduh…` }).show(); } catch { /* ok */ }
+    showProgress(`Mengunduh pembaruan ${info.version}…`);
   });
-  autoUpdater.on("download-progress", (p) => { if (win) win.setProgressBar((p.percent || 0) / 100); });
+  autoUpdater.on("download-progress", (p) => { const pct = p.percent || 0; setProgress(pct); if (win) win.setProgressBar(pct / 100); });
   autoUpdater.on("update-not-available", () => {
     if (manual) dialog.showMessageBox({ type: "info", message: "Sudah versi terbaru", detail: `Versi ${app.getVersion()}` });
   });
   autoUpdater.on("error", (err) => {
+    closeProgress();
     if (win) win.setProgressBar(-1);
     if (manual) dialog.showMessageBox({ type: "warning", message: "Gagal memeriksa pembaruan", detail: String((err && err.message) || err) });
   });
   autoUpdater.on("update-downloaded", async (info) => {
+    closeProgress();
     if (win) win.setProgressBar(-1);
     const r = await dialog.showMessageBox({
       type: "info", buttons: ["Pasang & mulai ulang", "Nanti"], defaultId: 0, cancelId: 1,

@@ -115,6 +115,33 @@ def smart_pair(font, left, right, *, upm, step=10, deadband=3, clamp_frac=0.18, 
     return int(max(-clamp, min(clamp, k)))
 
 
+def auto_kern_pairs(font, names, *, upm, step=10, deadband=6, clamp_frac=0.18, target=None):
+    """Kern optikal untuk SEMUA pasangan berurutan dari `names` (glyph-level). Profil di-precompute
+    SEKALI (bukan per pasangan) → cepat. Return {(L,R): int} hanya utk |v|>=deadband. TIDAK menulis."""
+    data = {}
+    for n in names:
+        if n in font:
+            p = _profiles(font[n])
+            if p:
+                data[n] = p
+    ns = [n for n in names if n in data]
+    if target is None:
+        target = _reference_target(font, upm, step)
+    clamp = upm * clamp_frac
+    out = {}
+    for L in ns:
+        Lc, Ladv = data[L][0], font[L].width
+        for R in ns:
+            avg = _avg_gap(Lc, Ladv, data[R][0], step)
+            if avg is None:
+                continue
+            k = round(target - avg)
+            if abs(k) < deadband:
+                continue
+            out[(L, R)] = int(max(-clamp, min(clamp, k)))
+    return out
+
+
 def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
                   deadband=8, step=10, samples=10, clamp_frac=0.15):
     """Hitung & tulis seed kerning class-level ke `font`. Return dict laporan."""
