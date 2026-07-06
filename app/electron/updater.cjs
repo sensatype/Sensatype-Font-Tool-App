@@ -165,13 +165,21 @@ function checkWin(manual) {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.removeAllListeners();
+  const win = BrowserWindow.getAllWindows()[0] || null;
+  // Beri tahu saat versi baru mulai diunduh (biar tak terasa 'tak ada update').
+  autoUpdater.on("update-available", (info) => {
+    try { new Notification({ title: "Sensatype Font Tool", body: `Versi baru ${info.version} — mengunduh di latar…` }).show(); } catch { /* ok */ }
+  });
+  autoUpdater.on("download-progress", (p) => { if (win) win.setProgressBar((p.percent || 0) / 100); });
   autoUpdater.on("update-not-available", () => {
     if (manual) dialog.showMessageBox({ type: "info", message: "Sudah versi terbaru", detail: `Versi ${app.getVersion()}` });
   });
   autoUpdater.on("error", (err) => {
+    if (win) win.setProgressBar(-1);
     if (manual) dialog.showMessageBox({ type: "warning", message: "Gagal memeriksa pembaruan", detail: String((err && err.message) || err) });
   });
   autoUpdater.on("update-downloaded", async (info) => {
+    if (win) win.setProgressBar(-1);
     const r = await dialog.showMessageBox({
       type: "info", buttons: ["Pasang & mulai ulang", "Nanti"], defaultId: 0, cancelId: 1,
       message: `Pembaruan ${info.version} siap dipasang`,
