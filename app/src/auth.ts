@@ -51,5 +51,7 @@ export function focusApp(): void {
 // Peta role → kapabilitas UI. Samakan dgn ADMIN_ROLES di server/auth.py.
 export const ADMIN_ROLES = ["admin", "atasan"];
 export const can = {
-  export: (role?: string | null) => !!role && ADMIN_ROLES.includes(role),
+  // Export terbuka utk semua role kerja (admin/atasan/senior/member) — hanya viewer_eksekutif
+  // (lihat-saja) yang tidak. Dulu admin/atasan saja → di Mac rekan tim tombolnya "hilang".
+  export: (role?: string | null) => !!role && role !== "viewer_eksekutif",
 };

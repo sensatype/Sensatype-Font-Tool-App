@@ -548,7 +548,7 @@ def preview():
 
 
 @app.get("/api/export")
-def export(_: dict = Depends(auth.require_role("admin", "atasan"))):
+def export(_: dict = Depends(auth.require_role("admin", "atasan", "senior", "member"))):
     if not project.exists:
         raise HTTPException(404, "Tidak ada project")
     buf, name = project.export_zip()

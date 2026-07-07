@@ -1026,7 +1026,9 @@ class Project:
         font = ufoLib2.Font.open(src)
         for g in font:
             if g.name != ".notdef":
-                g.width = round(g.width + tracking)
+                # clamp ≥0: tracking negatif pada glyph sempit bisa membuat advance negatif →
+                # fontmake menolak ("width should not be negative") → SELURUH export gagal.
+                g.width = max(0, round(g.width + tracking))
         dst = Path(src).parent / (Path(src).stem + "_trk.ufo")
         if dst.exists():
             shutil.rmtree(dst)
