@@ -136,6 +136,34 @@ def _locked(fn):
     return wrap
 
 
+def _fit_to_ink(font):
+    """Rapatkan sidebearing SEMUA glyph ke ink: LSB=0 & RSB=0 (advance = lebar ink). Mutasi font
+    IN-PLACE, tidak menyimpan. Order-independent (pakai bounds asli) & aman komposit (offset
+    komponen dikompensasi agar huruf beraksen tak bergeser relatif). Return jumlah glyph diproses."""
+    order = [n for n in font.glyphOrder if n != ".notdef" and n in font]
+    bounds = {}
+    for n in order:
+        b = font[n].getBounds(font)
+        if b is not None and b.xMax > b.xMin:  # ada ink; lewati glyph kosong (spasi)
+            bounds[n] = (b.xMin, b.xMax)
+    dx = {n: -xy[0] for n, xy in bounds.items()}
+    for n, (xMin, xMax) in bounds.items():
+        g = font[n]
+        d = dx[n]
+        if d:
+            for c in g:
+                for p in c:
+                    p.x += d
+            for a in g.anchors:
+                a.x += d
+        for comp in g.components:  # ikut geser +d, tapi base-nya juga digeser → kompensasi
+            t = list(comp.transformation)
+            t[4] += d - dx.get(comp.baseGlyph, 0)
+            comp.transformation = tuple(t)
+        g.width = round(xMax + d)
+    return len(bounds)
+
+
 class Project:
     def __init__(self, root: Path = WORKSPACE):
         self.root = root
@@ -216,7 +244,7 @@ class Project:
         spec = tmp / "_specimen.svg"
         spec.write_bytes(svg_bytes)
         self._split(spec, gdir, layout, rows)
-        self._build_ufo_at(gdir, tmp / "project.ufo", family, style, preset)
+        self._build_ufo_at(gdir, tmp / "project.ufo", family, style, preset, fit_ink=True)
         self._swap_root(tmp)  # sukses → ganti workspace lama
         meta = {"family": family, "style": style, "upm": 1000, "preset": preset,
                 "layout": layout, "rows": rows,
@@ -242,7 +270,7 @@ class Project:
             gdir.mkdir(parents=True)
             for name, data in files:
                 (gdir / name).write_bytes(data)
-            self._build_ufo_at(gdir, tmp / "project.ufo", fam, sty, pre)  # gagal → tmp dibuang, root utuh
+            self._build_ufo_at(gdir, tmp / "project.ufo", fam, sty, pre, fit_ink=True)  # gagal → tmp dibuang, root utuh
             meta = {"family": fam, "style": sty, "upm": 1000, "preset": pre, "layout": None,
                     "rows": "upper,lower",
                     "masters": [{"value": None, "ufo": "project.ufo", "name": sty}], "axis": None}
@@ -259,7 +287,7 @@ class Project:
         tmp_ufo = self.root / "project_new.ufo"
         if tmp_ufo.exists():
             shutil.rmtree(tmp_ufo)
-        self._build_ufo_at(self.glyph_dir, tmp_ufo, fam, sty, pre)
+        self._build_ufo_at(self.glyph_dir, tmp_ufo, fam, sty, pre, fit_ink=True)
         if self.ufo_path.exists():
             shutil.rmtree(self.ufo_path)
         tmp_ufo.rename(self.ufo_path)
@@ -528,7 +556,7 @@ class Project:
         self._set_progress(15, "Membangun font…")
         # build_ufo melapor 0..1 → petakan ke 15..80% (tahap terberat: bersih kontur, spacing, kerning)
         self._build_ufo_at(gdir, tmp / "project.ufo", family, style, preset,
-                           progress=lambda frac, label: self._set_progress(15 + int(65 * frac), label))
+                           progress=lambda frac, label: self._set_progress(15 + int(65 * frac), label), fit_ink=True)
         self._swap_root(tmp)  # sukses → ganti workspace lama (staging lama ikut terhapus)
         meta = {"family": family, "style": style, "upm": 1000, "preset": preset, "layout": None,
                 "rows": None, "masters": [{"value": None, "ufo": "project.ufo", "name": style}], "axis": None}
@@ -544,11 +572,18 @@ class Project:
         rows_spec = tuple(r.strip() for r in (rows or "upper,lower").split(","))
         specimen_split.split(spec, out_dir, rows_spec=rows_spec, layout=lay)
 
-    def _build_ufo_at(self, glyph_dir, ufo_path, family, style, preset, progress=None):
+    def _build_ufo_at(self, glyph_dir, ufo_path, family, style, preset, progress=None, fit_ink=False):
         svgs = sorted(Path(glyph_dir).glob("*.svg"))
         smoke_test.build_ufo(svgs, ufo_path, upm=1000, baseline_ratio=0.8,
                              family=family, style=style, autospace=True, kern=True, preset=preset,
                              progress=progress)
+        # fit_ink: rapatkan batas kiri/kanan tiap glyph ke node terluar (LSB=RSB=0) segera setelah
+        # dibangun — dipakai di jalur IMPORT (pilihan user: otomatis setiap import). Re-seed/respace
+        # TIDAK fit (fit_ink=False) → tetap memakai spacing preset.
+        if fit_ink:
+            f = ufoLib2.Font.open(ufo_path)
+            if _fit_to_ink(f):
+                f.save(ufo_path, overwrite=True)
 
     # --- variable font: masters & axis ------------------------------------
     @_locked
@@ -622,36 +657,16 @@ class Project:
     # --- edit metrik -------------------------------------------------------
     @_locked
     def fit_all(self, recompile=False):
-        """Rapatkan sidebearing SEMUA glyph ke ink: LSB=0 & RSB=0 → batas kiri/kanan tiap
-        glyph menempel ke node terluar (advance = lebar ink). Order-independent & aman komposit:
-        pakai bounds ASLI + kompensasi offset komponen agar huruf beraksen tak bergeser relatif."""
+        """Rapatkan sidebearing SEMUA glyph ke ink (LSB=0 & RSB=0) — batas kiri/kanan tiap glyph
+        menempel ke node terluar. Logika di modul _fit_to_ink (juga dipakai otomatis saat import)."""
         font = self._font()
-        order = [n for n in font.glyphOrder if n != ".notdef" and n in font]
-        bounds = {}
-        for n in order:
-            b = font[n].getBounds(font)
-            if b is not None and b.xMax > b.xMin:  # ada ink; lewati glyph kosong (spasi)
-                bounds[n] = (b.xMin, b.xMax)
-        dx = {n: -xy[0] for n, xy in bounds.items()}
-        for n, (xMin, xMax) in bounds.items():
-            g = font[n]
-            d = dx[n]
-            if d:
-                for c in g:
-                    for p in c:
-                        p.x += d
-                for a in g.anchors:
-                    a.x += d
-            for comp in g.components:  # ikut geser +d, tapi base-nya juga digeser → kompensasi
-                t = list(comp.transformation)
-                t[4] += d - dx.get(comp.baseGlyph, 0)
-                comp.transformation = tuple(t)
-            g.width = round(xMax + d)
-        if bounds:
+        total = len([n for n in font.glyphOrder if n != ".notdef" and n in font])
+        fitted = _fit_to_ink(font)
+        if fitted:
             font.save(self.ufo_path, overwrite=True)
             if recompile:
                 self.compile_static()
-        return {"fitted": len(bounds), "total": len(order), "skipped": len(order) - len(bounds)}
+        return {"fitted": fitted, "total": total, "skipped": total - fitted}
 
     @_locked
     def set_spacing(self, name, lsb=None, rsb=None, recompile=True):
