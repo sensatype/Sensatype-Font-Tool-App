@@ -91,7 +91,10 @@ export function GlyphEditor({
   useEffect(() => { localStorage.setItem("ge.grid", showGrid ? "1" : "0"); }, [showGrid]);
   const [canvasDark, setCanvasDark] = useState(() => localStorage.getItem("ge.canvasDark") === "1"); // kanvas gelap (opsional)
   useEffect(() => { localStorage.setItem("ge.canvasDark", canvasDark ? "1" : "0"); }, [canvasDark]);
-  const [snapNodes, setSnapNodes] = useState(false);    // snap ALIGNMENT ke node/handle/metrik (opt-in; default off agar tak ganggu editing halus)
+  // Snap ALIGNMENT ke node/handle/metrik. Default AKTIF & diingat antar-sesi (dulu default off &
+  // tak persisten → praktis tak pernah dipakai walau fiturnya ada). Tahan Alt saat seret = matikan sementara.
+  const [snapNodes, setSnapNodes] = useState(() => localStorage.getItem("ge.snapNodes") !== "0");
+  useEffect(() => { localStorage.setItem("ge.snapNodes", snapNodes ? "1" : "0"); }, [snapNodes]);
   const [snapG, setSnapG] = useState<{ x: number | null; y: number | null } | null>(null); // garis bantu snap (koord font)
   const [baseLineY, setBaseLineY] = useState(0); // posisi garis baseline saat diseret (ikut bergerak + nempel)
   // sub-alat dalam mode Contour: pilih node / gambar kotak / gambar elips / anchor
@@ -693,8 +696,11 @@ export function GlyphEditor({
   const snap1 = (v: number) => { const s = snapOn && snapStep > 0 ? snapStep : 1; return Math.round(v / s) * s; };
   // snap node/handle: alignment ke X/Y node-handle lain + garis metrik (prioritas), grid fallback.
   // exclude (ci,pi) yang sedang diseret; metrik hanya utk Y. Mengembalikan posisi + koord garis-bantu (gx/gy null bila tak align).
-  function snapNode(rawX: number, rawY: number, exclCi: number, exclPi: Set<number>) {
+  // bypass (Alt ditahan) → GERAK BEBAS: tanpa snap node/handle/metrik MAUPUN grid. Penting sejak
+  // snapNodes default AKTIF — tanpa jalan keluar, penyetelan halus jadi mustahil.
+  function snapNode(rawX: number, rawY: number, exclCi: number, exclPi: Set<number>, bypass = false) {
     let x = rawX, y = rawY, gx: number | null = null, gy: number | null = null;
+    if (bypass) return { x: Math.round(x), y: Math.round(y), gx: null, gy: null };
     if (snapNodes) {
       const thr = 6 * upp(); // 6px layar → unit font
       let bestX = thr, bestY = thr;
@@ -1045,7 +1051,7 @@ export function GlyphEditor({
         if (e.shiftKey && g.hasAnchor) { // Shift = snap sudut 45° (diprioritaskan, abaikan snap lain)
           const [vx2, vy2] = snap45(nx - g.ax, ny - g.ay); nx = Math.round(g.ax + vx2); ny = Math.round(g.ay + vy2);
           setSnapG(null);
-        } else { const s = snapNode(nx, ny, g.ci, new Set([g.pi, g.oppIdx].filter((i) => i >= 0))); nx = s.x; ny = s.y; setSnapG(s.gx != null || s.gy != null ? { x: s.gx, y: s.gy } : null); }
+        } else { const s = snapNode(nx, ny, g.ci, new Set([g.pi, g.oppIdx].filter((i) => i >= 0)), e.altKey); nx = s.x; ny = s.y; setSnapG(s.gx != null || s.gy != null ? { x: s.gx, y: s.gy } : null); }
         applyContours(contoursRef.current.map((c, ci) => ci !== g.ci ? c : c.map((p, pi) => {
           if (pi === g.pi) return { ...p, x: nx, y: ny };
           if (g.tied && pi === g.oppIdx) { // node halus: handle lawan tetap collinear (panjangnya dipertahankan)
@@ -1059,7 +1065,7 @@ export function GlyphEditor({
         // snap POSISI node (alignment node/handle/metrik + grid) → node mendarat tepat, handle ikut delta sama
         let nxp: number, nyp: number;
         if (e.shiftKey) { nxp = Math.round(g.ox + dx); nyp = Math.round(g.oy + dy); setSnapG(null); }
-        else { const s = snapNode(g.ox + dx, g.oy + dy, g.ci, new Set([g.pi, ...g.handles.map((h: any) => h.hi)])); nxp = s.x; nyp = s.y; setSnapG(s.gx != null || s.gy != null ? { x: s.gx, y: s.gy } : null); }
+        else { const s = snapNode(g.ox + dx, g.oy + dy, g.ci, new Set([g.pi, ...g.handles.map((h: any) => h.hi)]), e.altKey); nxp = s.x; nyp = s.y; setSnapG(s.gx != null || s.gy != null ? { x: s.gx, y: s.gy } : null); }
         const ndx = nxp - g.ox, ndy = nyp - g.oy;
         applyContours(contoursRef.current.map((c, ci) => ci !== g.ci ? c : c.map((p, pi) => {
           if (pi === g.pi) return { ...p, x: g.ox + ndx, y: g.oy + ndy };
@@ -1082,7 +1088,7 @@ export function GlyphEditor({
       g.moved = true;
       let dx = (e.clientX - g.cx) * k, dy = -(e.clientY - g.cy) * k;
       if (e.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; } // kunci sumbu
-      const s = snapNode(g.ox + dx, g.oy + dy, -1, new Set()); // anchor snap ke semua node/metrik
+      const s = snapNode(g.ox + dx, g.oy + dy, -1, new Set(), e.altKey); // anchor snap ke semua node/metrik
       setSnapG(s.gx != null || s.gy != null ? { x: s.gx, y: s.gy } : null);
       setAnchors(anchorsRef.current.map((a, i) => (i === g.i ? { ...a, x: s.x, y: s.y } : a)));
     } else if (g.kind === "component") {
@@ -1321,7 +1327,10 @@ export function GlyphEditor({
               style={{ background: showGrid ? "var(--accent)" : "transparent", color: showGrid ? "#fff" : "var(--muted)" }}>
               <Grid3x3 className="size-3.5" />
             </button>
-            <button className="btn !p-1.5" onClick={() => setSnapNodes((s) => !s)} title={snapNodes ? "Snap ke node/handle/metrik: AKTIF" : "Snap ke node/handle: nonaktif"}
+            <button className="btn !p-1.5" onClick={() => setSnapNodes((s) => !s)}
+              title={snapNodes
+                ? "Snap node/handle/metrik: AKTIF — node lurus dgn node/handle lain & garis metrik (baseline, x-height, cap). Garis bantu muncul saat sejajar. Tahan Alt utk matikan sementara."
+                : "Snap node/handle/metrik: NONAKTIF — klik utk mengaktifkan (node menempel lurus ke node/handle lain & garis metrik)"}
               style={{ background: snapNodes ? "var(--accent)" : "transparent", color: snapNodes ? "#fff" : "var(--muted)" }}>
               <Crosshair className="size-3.5" />
             </button>

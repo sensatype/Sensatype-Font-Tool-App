@@ -1,8 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ZoomIn, ZoomOut, Maximize, Magnet } from "lucide-react";
 import type { StagedGuide, StagingState } from "../types";
 
 const MIN_Z = 0.25, MAX_Z = 10; // 25%–1000%
+const SNAP_PX = 7;              // jarak tarik magnet (piksel layar)
+
+/**
+ * Kelompokkan nilai tepi (bbox) jadi klaster ber-toleransi. Lebar tiap klaster dibatasi `tol`
+ * (dibandingkan ke ANGGOTA PERTAMA, bukan berantai) agar tak melar.
+ *
+ * INTI TIPOGRAFI: klaster TERBESAR = huruf beralas/berpuncak RATA (H I E x n m) = baseline/cap SEJATI.
+ * Huruf bulat & lancip (o e c s v w A) punya OVERSHOOT ~1–1.5% — sengaja menonjol melewati garis agar
+ * tampak sejajar optis — sehingga jatuh ke klaster kecil terpisah. Karena itu snap HARUS memilih
+ * klaster paling ramai, BUKAN tepi terekstrem/terdekat; kalau tidak, baseline mendarat di overshoot 'o'
+ * dan metrik vertikal SELURUH font meleset.
+ */
+function clusterEdges(vals: number[], tol: number): { y: number; count: number }[] {
+  if (!vals.length) return [];
+  const s = [...vals].sort((a, b) => a - b);
+  const out: { y: number; count: number }[] = [];
+  let grp: number[] = [s[0]];
+  const finish = (g: number[]) => out.push({ y: Math.round(g[Math.floor(g.length / 2)]), count: g.length }); // median
+  for (let i = 1; i < s.length; i++) {
+    if (s[i] - grp[0] <= tol) grp.push(s[i]);
+    else { finish(grp); grp = [s[i]]; }
+  }
+  finish(grp);
+  return out;
+}
 
 /**
  * Kanvas specimen (viewport TETAP, konten di-transform → GPU/composited, mulus).
@@ -35,6 +60,10 @@ export function SpecimenCanvas({
   const zoom = view.zoom;
   const [marquee, setMarquee] = useState<{ sx: number; sy: number; cx: number; cy: number; n: number } | null>(null);
   const [moveOff, setMoveOff] = useState<{ dx: number; dy: number; ids: Set<number> } | null>(null);
+  // MAGNET garis: menempel ke tepi DOMINAN glyph (lihat clusterEdges). Default AKTIF.
+  const [snapOn, setSnapOn] = useState(() => localStorage.getItem("sc.snap") !== "0");
+  useEffect(() => { localStorage.setItem("sc.snap", snapOn ? "1" : "0"); }, [snapOn]);
+  const [snapHit, setSnapHit] = useState<{ y: number; count: number; type: string } | null>(null); // indikator saat menempel
   const svgRef = useRef<SVGSVGElement>(null);
   const contRef = useRef<HTMLDivElement>(null);
   const guideDrag = useRef<any>(null);
@@ -44,6 +73,22 @@ export function SpecimenCanvas({
   const moveOffRef = useRef(moveOff); moveOffRef.current = moveOff;
   const guidesRef = useRef(guides); guidesRef.current = guides;
   const selGRef = useRef(selG); selGRef.current = selG;
+  const snapOnRef = useRef(snapOn); snapOnRef.current = snapOn;
+  // Klaster tepi bawah (utk baseline) & tepi atas (utk cap) dari bbox shape yang IKUT diimpor.
+  // Toleransi klaster sengaja DI BAWAH besar overshoot (~1–1.5% tinggi glyph) supaya huruf beralas
+  // rata dan huruf overshoot TIDAK menyatu jadi satu klaster.
+  const edgeClusters = useMemo(() => {
+    const shapes = staging.shapes.filter((s) => !s.excluded);
+    if (!shapes.length) return { baseline: [], cap: [] };
+    const hs = shapes.map((s) => s.bbox[3] - s.bbox[1]).sort((a, b) => a - b);
+    const H = hs[Math.floor(hs.length / 2)] || 1;          // tinggi glyph median
+    const tol = Math.max(1, H * 0.005);                    // 0.5% < overshoot → tetap terpisah
+    return {
+      baseline: clusterEdges(shapes.map((s) => s.bbox[3]), tol), // tepi BAWAH (y membesar ke bawah)
+      cap: clusterEdges(shapes.map((s) => s.bbox[1]), tol),      // tepi ATAS
+    };
+  }, [staging.shapes]);
+  const clustersRef = useRef(edgeClusters); clustersRef.current = edgeClusters;
   const selRef = useRef(sel); selRef.current = sel;
   const onMoveRef = useRef(onMoveShapes); onMoveRef.current = onMoveShapes;
   const viewRef = useRef(view); viewRef.current = view;
@@ -146,6 +191,18 @@ export function SpecimenCanvas({
   }
   const upp = () => { const m = svgRef.current?.getScreenCTM(); return m ? 1 / m.d : 1; };
 
+  // Klaster tepi terbaik utk garis yang sedang diseret. URUTAN PRIORITAS: jumlah anggota (paling
+  // ramai = alas/puncak RATA), BARU jarak. Sengaja BUKAN "yang terdekat" — kalau memilih terdekat,
+  // baseline akan menempel ke overshoot huruf bulat yang kebetulan lebih dekat. Null = tak menempel.
+  function snapGuideY(type: string, y: number): { y: number; count: number } | null {
+    const cl = type === "cap" ? clustersRef.current.cap : clustersRef.current.baseline;
+    const thr = SNAP_PX * upp();
+    const near = cl.filter((c) => Math.abs(c.y - y) <= thr && c.count > 0);
+    if (!near.length) return null;
+    near.sort((a, b) => (b.count - a.count) || (Math.abs(a.y - y) - Math.abs(b.y - y)));
+    return near[0];
+  }
+
   // client px → koordinat SVG (memperhitungkan transform + viewBox)
   function toSvg(cx: number, cy: number) {
     const m = svgRef.current!.getScreenCTM()!.inverse();
@@ -212,8 +269,19 @@ export function SpecimenCanvas({
   function onMove(e: React.PointerEvent) {
     if (dragKind.current === "guide") {
       const d = guideDrag.current; if (!d) return;
-      const dy = (e.clientY - d.cy) * upp();
+      let dy = (e.clientY - d.cy) * upp();
       if (Math.abs(dy) > 0.5) d.moved = true;
+      // MAGNET: hitung tempelan utk garis yang BENAR-BENAR diseret (clickedId), lalu terapkan
+      // delta yang SAMA ke seluruh garis segrup → jarak antar-garis se-tipe tetap utuh.
+      // Tahan ⌘/Ctrl = matikan magnet sementara (Alt sudah dipakai utk salin, Shift utk multi-pilih).
+      let hit: { y: number; count: number } | null = null;
+      const g0 = guidesRef.current.find((x) => x.id === d.clickedId);
+      if (snapOnRef.current && !(e.metaKey || e.ctrlKey) && g0) {
+        const yCur = d.startYs[d.clickedId] + dy;
+        hit = snapGuideY(g0.type, yCur);
+        if (hit) dy += hit.y - yCur; // dorong delta agar garis mendarat TEPAT di klaster
+      }
+      setSnapHit(hit && g0 ? { y: hit.y, count: hit.count, type: g0.type } : null);
       applyGuides(guidesRef.current.map((g) => d.ids.includes(g.id) ? { ...g, y: Math.round(d.startYs[g.id] + dy) } : g));
       return;
     }
@@ -241,6 +309,7 @@ export function SpecimenCanvas({
   function onUp() {
     if (dragKind.current === "guide") {
       dragKind.current = null;
+      setSnapHit(null);                       // indikator magnet hilang saat seret selesai
       const d = guideDrag.current; guideDrag.current = null;
       if (!d) return;
       if (d.moved || d.commit) emitGuides(guidesRef.current);
@@ -315,6 +384,17 @@ export function SpecimenCanvas({
             </g>
           );
         })}
+        {/* Indikator magnet: garis hijau tepat di klaster tepi dominan + JUMLAH glyph yang sejajar
+            di situ → Anda melihat DASAR penempelannya, bukan sekadar "tiba-tiba nempel". */}
+        {snapHit && (
+          <g pointerEvents="none">
+            <line x1={vbX} y1={snapHit.y} x2={vbX + vbW} y2={snapHit.y}
+              stroke="#3ddc84" strokeWidth={stroke * 2.4} opacity={0.95} />
+            <text x={vbX + 8 * u} y={snapHit.y + 16 * u} fill="#3ddc84" fontSize={labelSize} fontWeight="600">
+              {snapHit.count} glyph sejajar · {snapHit.type === "cap" ? "puncak rata" : "alas rata"}
+            </text>
+          </g>
+        )}
       </svg>
 
       {/* kotak marquee + badge jumlah (koordinat layar) */}
@@ -348,6 +428,14 @@ export function SpecimenCanvas({
 
       <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-lg p-1"
         style={{ background: "var(--panel)", border: "1px solid var(--border)" }}>
+        <button className="btn !p-1.5" onClick={() => setSnapOn((v) => !v)}
+          style={{ color: snapOn ? "var(--accent)" : "var(--muted)" }}
+          title={snapOn
+            ? "Magnet AKTIF — garis menempel ke tepi DOMINAN glyph (alas/puncak rata), bukan ke overshoot huruf bulat. Tahan ⌘/Ctrl saat menyeret utk mematikan sementara."
+            : "Magnet MATI — garis bebas digeser"}>
+          <Magnet className="size-4" />
+        </button>
+        <div className="h-5 w-px" style={{ background: "var(--border-2)" }} />
         <button className="btn !p-1.5" onClick={() => zoomBtn(0.8)} title="Zoom out"><ZoomOut className="size-4" /></button>
         <span className="text-xs text-muted tabular-nums w-12 text-center">{Math.round(zoom * 100)}%</span>
         <button className="btn !p-1.5" onClick={() => zoomBtn(1.25)} title="Zoom in"><ZoomIn className="size-4" /></button>
