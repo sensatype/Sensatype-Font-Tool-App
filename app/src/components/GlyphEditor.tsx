@@ -268,7 +268,9 @@ export function GlyphEditor({
   // pasangan berganti → reset guard echo + buang nilai tertahan. Ref di-sync SINKRON:
   // efek smart di bawah berjalan pada commit yang sama & membaca ref ini — kalau hanya setState,
   // ref masih berisi dirty lama → computeSmart terlewat → saran smart tak pernah dihitung.
-  useEffect(() => { pendingKern.current = null; smartSkipRef.current = false; kernDirtyRef.current = false; setKernDirty(false); }, [kernLeft, kernRight]); // tracking global tak per-pasangan → trackVal tak disentuh
+  useEffect(() => { pendingKern.current = null; smartSkipRef.current = false; kernDirtyRef.current = false; setKernDirty(false);
+    if (kernScopeRef.current === "all") setTrackVal(tracking); // scope "Semuanya": buang draft spasi yg belum diterapkan agar field tak menyesatkan (tampil "40" padahal belum tersimpan)
+  }, [kernLeft, kernRight]); // eslint-disable-line react-hooks/exhaustive-deps
   // ambil info kern saat pasangan berubah — HANYA di mode Kerning (hemat: commit node/spasi
   // di mode lain tak perlu memicu fetch kern; masuk mode Kerning → fetch segar via dep `mode`)
   useEffect(() => {
@@ -1759,7 +1761,7 @@ export function GlyphEditor({
               ? <Num label={kernDirty ? "Spasi semua*" : "Spasi semua"} value={trackVal} color={kernDirty ? "#e8a13a" : "var(--accent)"} onCommit={stageKern} title="Spasi global (em) — jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning. + renggang, − rapat. Nilai persisten; ikut export." />
               : <Num label={(kernScope === "smart" ? "Smart" : "Kern") + (kernDirty ? "*" : "")} value={kernVal} color={kernDirty ? "#e8a13a" : "var(--good)"} onCommit={stageKern} title="Nilai kern (em); + renggang, − rapat. Smart = saran optikal dari bentuk. Klik Terapkan utk menyimpan." />}
             {/* scope + nilai TERSIMPAN per level → jelas level mana yang punya nilai apa */}
-            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Semuanya = geser semua nilai kerning sekaligus (bake permanen) · Kelas = semua glyph se-grup · Pasangan = pasangan ini saja (exception) · Smart = saran kern optikal dari bentuk outline. Angka kecil = nilai tersimpan level itu.">
+            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Semuanya = spasi global seragam ke SEMUA pasangan (letter-spacing, non-destruktif, ikut export) · Kelas = semua glyph se-grup · Pasangan = pasangan ini saja (exception) · Smart = saran kern optikal dari bentuk outline. Angka kecil = nilai tersimpan level itu.">
               {(["all", "class", "pair", "smart"] as const).map((s) => {
                 const sv = s === "all" ? (tracking || null) : s === "class" ? kernInfo?.classValue ?? null : s === "pair" ? kernInfo?.pairValue ?? null : null;
                 const label = s === "all" ? "Semuanya" : s === "class" ? "Kelas" : s === "pair" ? "Pasangan" : "Smart";

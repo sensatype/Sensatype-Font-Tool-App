@@ -158,7 +158,10 @@ def _fit_to_ink(font):
                 a.x += d
         for comp in g.components:  # ikut geser +d, tapi base-nya juga digeser → kompensasi
             t = list(comp.transformation)
-            t[4] += d - dx.get(comp.baseGlyph, 0)
+            # base bergeser dx[base]; efeknya di komposit = xScale*dx[base] (skala komponen ikut).
+            # Untuk komponen mirror/scaled (xScale≠1) faktor ini WAJIB, kalau tidak huruf beraksen
+            # yang memakai komponen dicerminkan/diperkecil akan meloncat horizontal.
+            t[4] += d - t[0] * dx.get(comp.baseGlyph, 0)
             comp.transformation = tuple(t)
         g.width = round(xMax + d)
     return len(bounds)
@@ -890,11 +893,22 @@ class Project:
                     skipped += 1
                     continue
             elif key != (L, R):
-                # mode TIMPA: buang SEMUA exception yang lebih spesifik dari kunci kelas (per-glyph &
-                # half-class) — kalau tidak, mereka membayangi nilai kelas baru (§9.6) → kern tak berubah.
-                for ex in [(L, R), (lg, R) if lg else None, (L, rg) if rg else None]:
-                    if ex and ex != key:
-                        font.kerning.pop(ex, None)
+                # mode TIMPA: buang SEMUA exception yang lebih spesifik dari kunci kelas — bukan hanya
+                # (L,R) tapi SETIAP anggota grup kiri×kanan + half-class (§9.6). Kalau tidak, exception
+                # pada anggota lain (mis. Á V, sementara yang diproses A V) membayangi nilai kelas baru
+                # → kern anggota itu tak ikut berubah. Ambil anggota dari font.groups, bukan cuma L/R.
+                lefts = list(font.groups.get(lg, [])) if lg else [L]
+                rights = list(font.groups.get(rg, [])) if rg else [R]
+                for ml in lefts:
+                    for mr in rights:
+                        if (ml, mr) != key:
+                            font.kerning.pop((ml, mr), None)        # per-glyph
+                    if rg and (ml, rg) != key:
+                        font.kerning.pop((ml, rg), None)            # half-class (anggotaKiri, grupKanan)
+                if lg:
+                    for mr in rights:
+                        if (lg, mr) != key:
+                            font.kerning.pop((lg, mr), None)        # half-class (grupKiri, anggotaKanan)
             font.kerning[key] = v
             written += 1
         if written:
@@ -976,7 +990,10 @@ class Project:
             l, r = lg or left, rg or right  # pakai grup bila ada, fallback glyph
         else:
             l, r = left, right
-        v = int(value)
+        # clamp ke rentang int16 GPOS (±32767) + bulatkan — nilai di luar rentang membuat
+        # compile fontmake/otlLib GAGAL permanen (preview diam-diam berhenti, export 400).
+        # Konsisten dgn shift_all_kerning yang juga meng-clamp.
+        v = max(-32767, min(32767, round(float(value))))
         if v == 0:
             if scope == "pair":
                 # exception-ke-0 klasik: bila level KELAS ≠ 0, tulis (glyph,glyph)=0 eksplisit —

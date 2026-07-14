@@ -134,7 +134,10 @@ async function macUpdate(manual) {
 
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const assets = rel.assets || [];
-  const asset = assets.find((a) => a.name.endsWith(`${arch}.dmg`)) || assets.find((a) => a.name.endsWith(".dmg"));
+  // HANYA dmg arsitektur yang cocok — JANGAN jatuh ke .dmg generik: memasang arm64 di Intel
+  // (atau sebaliknya) menghasilkan app yang tak bisa jalan → lebih buruk dari sekadar "nyangkut".
+  // Tak ada dmg se-arsitektur → jalur unduh manual di bawah.
+  const asset = assets.find((a) => a.name.endsWith(`${arch}.dmg`));
   // execPath SELALU …/Nama.app/Contents/MacOS/Nama → naik 3 level. (JANGAN indexOf(".app"):
   // path induk yang mengandung ".app" — mis. /dev.apps/ — akan terpotong salah → rm -rf path keliru.)
   const appBundle = path.resolve(process.execPath, "..", "..", "..");
@@ -179,23 +182,33 @@ async function macUpdate(manual) {
 DMG=${shq(dmgPath)}
 APP=${shq(appBundle)}
 PID=${process.pid}
+# Tunggu app lama keluar (maks 60s).
 for i in $(seq 1 200); do kill -0 "$PID" 2>/dev/null || break; sleep 0.3; done
+# Masih hidup? JANGAN timpa bundle yang sedang jalan (risiko korupsi). Buka DMG utk pasang manual.
+if kill -0 "$PID" 2>/dev/null; then open "$DMG"; rm -f "$0"; exit 0; fi
+OK=0
 MNT=$(mktemp -d /tmp/sensatype-mnt.XXXXXX)
-hdiutil attach "$DMG" -nobrowse -noverify -mountpoint "$MNT" >/dev/null 2>&1
-SRC=$(ls -d "$MNT"/*.app 2>/dev/null | head -1)
-if [ -n "$SRC" ]; then
-  rm -rf "$APP.new"
-  if /usr/bin/ditto "$SRC" "$APP.new"; then
-    rm -rf "$APP"
-    mv "$APP.new" "$APP"
-    /usr/bin/xattr -dr com.apple.quarantine "$APP" >/dev/null 2>&1 || true
-  else
+if hdiutil attach "$DMG" -nobrowse -noverify -mountpoint "$MNT" >/dev/null 2>&1; then
+  SRC=$(ls -d "$MNT"/*.app 2>/dev/null | head -1)
+  if [ -n "$SRC" ]; then
     rm -rf "$APP.new"
+    if /usr/bin/ditto "$SRC" "$APP.new"; then
+      rm -rf "$APP"          # salinan .new sukses → baru buang app lama
+      mv "$APP.new" "$APP"
+      /usr/bin/xattr -dr com.apple.quarantine "$APP" >/dev/null 2>&1 || true
+      OK=1
+    else
+      rm -rf "$APP.new"      # salin gagal → app lama TETAP utuh
+    fi
   fi
+  hdiutil detach "$MNT" >/dev/null 2>&1 || true
 fi
-hdiutil detach "$MNT" >/dev/null 2>&1 || true
-rm -f "$DMG"
-open "$APP"
+if [ "$OK" = "1" ]; then
+  rm -f "$DMG"
+  open "$APP"                # sukses → buka versi baru
+else
+  open "$DMG"                # GAGAL → tampilkan DMG utk pasang manual (JANGAN diam-diam buka app lama)
+fi
 rm -f "$0"
 `;
   const scriptPath = path.join(os.tmpdir(), `sensatype-update-${latest}.sh`);

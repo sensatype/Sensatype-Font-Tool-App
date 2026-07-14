@@ -63,8 +63,21 @@ function resolveContentDir() {
   const overlay = path.join(app.getPath("userData"), "content");
   const staging = path.join(app.getPath("userData"), "content-staging");
   if (fs.existsSync(path.join(staging, "meta.json"))) {
-    try { fs.rmSync(overlay, { recursive: true, force: true }); fs.renameSync(staging, overlay); }
-    catch (e) { console.error("[content] gagal terapkan staging", e); try { fs.rmSync(staging, { recursive: true, force: true }); } catch { /* ok */ } }
+    // Swap AMAN: sisihkan overlay lama ke .old DULU, pasang staging, baru buang .old. JANGAN
+    // hapus overlay hidup sebelum staging benar-benar terpasang — kalau rename gagal di tengah,
+    // overlay lama masih bisa dipulihkan (hindari regresi diam-diam ke baseline lama + loop unduh).
+    const old = overlay + ".old";
+    try {
+      fs.rmSync(old, { recursive: true, force: true });
+      if (fs.existsSync(overlay)) fs.renameSync(overlay, old);   // overlay lama → .old
+      fs.renameSync(staging, overlay);                            // staging → overlay
+      fs.rmSync(old, { recursive: true, force: true });          // sukses → buang yang lama
+    } catch (e) {
+      console.error("[content] gagal terapkan staging", e);
+      try { if (!fs.existsSync(overlay) && fs.existsSync(old)) fs.renameSync(old, overlay); } catch { /* ok */ } // pulihkan
+      try { fs.rmSync(staging, { recursive: true, force: true }); } catch { /* ok */ }
+      try { fs.rmSync(old, { recursive: true, force: true }); } catch { /* ok */ }
+    }
   }
   const bV = contentVer(baseline), oV = contentVer(overlay);
   const dir = (oV > bV) ? overlay : baseline;
@@ -79,8 +92,13 @@ async function checkContent(manual = false) {
   try {
     const { checkContentUpdate } = require("./content-update.cjs");
     const r = await checkContentUpdate({ currentContentVer: effectiveContentVer });
-    if (manual && (r.status === "none" || r.status === "needsApp")) {
+    if (manual && r.status === "none") {
       dialog.showMessageBox({ type: "info", message: "Isi sudah terbaru", detail: `Versi isi ${effectiveContentVer}.` });
+    }
+    if (manual && r.status === "needsApp") {
+      // JANGAN bilang "sudah terbaru" — ada isi baru yang butuh aplikasi lebih baru. Beri tahu jujur;
+      // pemanggil akan lanjut ke cek installer penuh (checkForUpdates) karena status ≠ "staged".
+      dialog.showMessageBox({ type: "info", message: "Perlu perbarui aplikasi", detail: `Ada pembaruan isi (v${r.version}) yang butuh aplikasi ≥ ${r.minApp}. Aplikasi akan memeriksa pembaruan installer.` });
     }
     if (r.status === "staged") {
       // Tawarkan RESTART sekarang → menerapkan update seketika (menghindari jebakan macOS:
@@ -91,10 +109,48 @@ async function checkContent(manual = false) {
         message: "Pembaruan siap dipasang",
         detail: "Perbaikan & fitur terbaru sudah diunduh. Mulai ulang aplikasi untuk menerapkannya?",
       });
-      if (resp.response === 0) { app.relaunch(); app.quit(); }
+      if (resp.response === 0) restartToApply();
     }
     return r.status;
   } catch (e) { console.error("[content]", e); return "error"; }
+}
+
+// Mulai ulang utk MENERAPKAN isi ter-stage. Bunuh backend lalu TUNGGU port benar-benar bebas
+// sebelum relaunch — kalau tidak, instance baru bisa memakai backend lama (yang masih meng-import
+// server versi lama) → swap seolah tak berefek (isi baru "tak muncul"). Ref: jebakan macOS.
+async function restartToApply() {
+  try {
+    const proc = backendProc;
+    if (proc) {
+      await new Promise((res) => {
+        let done = false; const fin = () => { if (!done) { done = true; res(); } };
+        proc.once("exit", fin);
+        try { proc.kill("SIGTERM"); } catch { /* sudah mati */ }
+        setTimeout(fin, 4000); // jangan menggantung
+      });
+    }
+    for (let i = 0; i < 20 && await ping(`${BACKEND_ORIGIN}/api/health`); i++) {
+      await new Promise((r) => setTimeout(r, 200)); // tunggu port lepas (maks ~4s)
+    }
+  } catch (e) { console.error("[content] restartToApply", e); }
+  app.relaunch(); app.quit();
+}
+
+// Cek pembaruan (isi + installer) dengan pengaman: satu cek sekali jalan, dan utk cek OTOMATIS
+// paling sering sekali per 30 menit. Dipanggil saat start, berkala (setInterval), & saat activate —
+// supaya app macOS yang jarang di-Cmd+Q (jendela ditutup ≠ keluar) tetap dapat pembaruan.
+let _lastUpdateCheck = 0;
+let _updateChecking = false;
+async function runUpdateChecks(manual = false) {
+  if (_updateChecking) return;
+  const now = Date.now();
+  if (!manual && now - _lastUpdateCheck < 30 * 60 * 1000) return;
+  _updateChecking = true; _lastUpdateCheck = now;
+  try {
+    const st = await checkContent(manual);       // dahulukan update isi (ringan)
+    if (st !== "staged") checkForUpdates(manual); // tak ada isi baru / butuh installer → cek installer
+  } catch (e) { console.error("[update] runUpdateChecks", e); }
+  finally { _updateChecking = false; }
 }
 
 function ping(url) {
@@ -135,7 +191,8 @@ async function ensureBackend() {
     args = ["--host", "127.0.0.1", "--port", String(BACKEND_PORT)];
     cwd = process.resourcesPath;
     // "Isi" (server+engine+dist) dimuat dari content dir aktif → bisa di-update tanpa reinstall.
-    const cdir = resolveContentDir();
+    // Sudah di-resolve di whenReady (menerapkan staging walau backend lama masih hidup); pakai itu.
+    const cdir = effectiveContentDir || resolveContentDir();
     env.SENSATYPE_CONTENT_DIR = cdir;          // run_backend menaruhnya di sys.path → import server dari sini
     env.SENSATYPE_ENGINE_DIR = path.join(cdir, "engine");
     env.SENSATYPE_DIST_DIR = path.join(cdir, "dist");
@@ -185,7 +242,7 @@ function buildMenu() {
     {
       label: "Bantuan",
       submenu: [
-        { label: "Periksa Pembaruan…", click: async () => { const s = await checkContent(true); if (s !== "staged") checkForUpdates(true); } },
+        { label: "Periksa Pembaruan…", click: () => runUpdateChecks(true) },
       ],
     },
   ];
@@ -285,15 +342,18 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(() => {
     buildMenu();
+    // Terapkan isi ter-stage & tetapkan versi isi TANPA syarat di sini — ensureBackend bisa
+    // early-return (backend lama masih hidup) & tak pernah memanggil resolveContentDir → dulu
+    // update-isi ter-stage tak pernah aktif + effectiveContentVer mentok 0 (loop unduh).
+    if (app.isPackaged) resolveContentDir();
     ensureBackend();   // spawn backend (tak diblok — createWindow menampilkan "Memuat…", startAppLoad menunggu health)
     createWindow();
-    // Auto-cek pembaruan setelah UI siap: dahulukan "update isi" (ringan). Kalau tak ada isi baru
-    // atau isi butuh installer lebih baru → cek saluran installer penuh.
-    setTimeout(async () => {
-      const st = await checkContent();
-      if (st !== "staged") checkForUpdates(false);
-    }, 5000);
-    app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+    // Auto-cek pembaruan setelah UI siap, lalu BERKALA. Tanpa yang berkala, di macOS (tutup jendela
+    // ≠ keluar app) cek cuma jalan sekali seumur proses → user "nyangkut" di versi lama selamanya.
+    setTimeout(() => runUpdateChecks(false), 5000);
+    setInterval(() => runUpdateChecks(false), 3 * 60 * 60 * 1000); // tiap 3 jam (dijaga min-interval 30 mnt)
+    // macOS: buka lagi jendela lewat Dock → cek pembaruan lagi (dijaga min-interval, tak spam).
+    app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); runUpdateChecks(false); });
   });
 }
 
