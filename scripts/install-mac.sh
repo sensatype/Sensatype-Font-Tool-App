@@ -24,10 +24,13 @@ pkill -f "${NAME}.app" >/dev/null 2>&1 || true; sleep 1
 
 echo "-> Menghapus versi lama (kedua lokasi) + sisa isi lama..."
 rm -rf "/Applications/${NAME}.app" "${HOME}/Applications/${NAME}.app"
-# sisa "isi" (content overlay/staging) dari update lama -> agar baseline v-baru dipakai bersih.
-# TIDAK menyentuh project Anda (itu di folder 'projects', tak dihapus).
-SUP="${HOME}/Library/Application Support/${NAME}"
-rm -rf "${SUP}/content" "${SUP}/content-staging"
+# Sisa "isi" (overlay/staging) + CACHE renderer dari versi lama -> agar baseline v-baru dipakai
+# bersih & UI tak nyangkut dari cache. Electron pakai field "name" (sensatype-fonttool-ui) utk
+# userData, BUKAN productName -> bersihkan KEDUA lokasi. TIDAK menyentuh projects/auth (tak dihapus).
+for UD in "${HOME}/Library/Application Support/sensatype-fonttool-ui" "${HOME}/Library/Application Support/${NAME}"; do
+  rm -rf "${UD}/content" "${UD}/content-staging" \
+         "${UD}/Cache" "${UD}/Code Cache" "${UD}/GPUCache" "${UD}/DawnCache" "${UD}/DawnWebGPUCache" 2>/dev/null || true
+done
 
 echo "-> Mencari rilis terbaru..."
 URL="$(curl -fsSL "${API}" | grep -oE 'https://[^"]*arm64\.dmg' | head -1 || true)"

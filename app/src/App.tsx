@@ -138,6 +138,21 @@ export function App() {
           }
         }}
         onHome={() => setView("hub")}
+        onClearKern={async () => {
+          if (!confirm(
+            "Nolkan SEMUA nilai kerning?\n\n" +
+            "Semua pasangan jadi 0. Kelas kern (grup bentuk) tetap ada → bisa langsung diatur massal " +
+            "lewat scope \"Kelas\". Berlaku permanen ke seluruh font.")) return;
+          try {
+            const r = await api.clearAllKern();
+            await api.recompilePreview().catch(() => {});
+            await applyState(await api.getProject());
+            setEditV((v) => v + 1); setFontV((v) => v + 1); // editor kern-panel + preview refetch
+            alert(`${r.cleared} nilai kerning dinolkan (kelas kern dipertahankan).`);
+          } catch (e) {
+            alert("Nolkan gagal: " + ((e as Error).message || e));
+          }
+        }}
       />
       <div className="flex-1 min-h-0 flex">
         <GlyphGrid

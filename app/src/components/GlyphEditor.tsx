@@ -142,7 +142,6 @@ export function GlyphEditor({
   const [trackVal, setTrackVal] = useState(tracking);
   useEffect(() => { if (!kernDirtyRef.current) setTrackVal(tracking); }, [tracking]);
   const [kernBusy, setKernBusy] = useState(false); // proses perluas group
-  const [clearKernBusy, setClearKernBusy] = useState(false); // proses nolkan semua kerning
   const [partnerData, setPartnerData] = useState<{ path: string; advance: number } | null>(null);
   const [selfData, setSelfData] = useState<{ path: string; advance: number } | null>(null); // data glyph aktif pasangan bila ≠ glyph terpilih
   // TEXT mode: proofing teks bebas
@@ -472,28 +471,7 @@ export function GlyphEditor({
         lsb: res.lsb, rsb: res.rsb, contours: res.contours, category: res.category, empty: res.empty });
     }).catch(() => { /* abaikan */ });
   }
-  // NOLKAN SEMUA KERNING: kosongkan seluruh nilai kerning (grup kelas tetap). Font-wide → reload.
-  async function runClearAllKern() {
-    if (clearKernBusy) return;
-    if (!confirm(
-      "Nolkan SEMUA nilai kerning?\n\n" +
-      "Semua pasangan jadi 0. Kelas kern (grup bentuk) tetap ada → bisa langsung diatur massal " +
-      "lewat scope \"Kelas\". Berlaku permanen ke seluruh font.")) return;
-    setClearKernBusy(true);
-    try {
-      const r = await serial(() => api.clearAllKern());
-      kernCache.current = {};
-      await onReload?.();
-      if (kernLeft && kernRight && glyphNames.includes(kernLeft) && glyphNames.includes(kernRight)) {
-        const k = await api.getKerning(kernLeft, kernRight);
-        setKernInfo(k); kernInfoRef.current = k; setKernVal(kernScoped(k, kernScope)); setKernDirty(false);
-      }
-      setProofTick((t) => t + 1);
-      alert(`${r.cleared} nilai kerning dinolkan (kelas kern dipertahankan).`);
-    } catch (e) {
-      alert("Nolkan gagal: " + ((e as Error).message || e));
-    } finally { setClearKernBusy(false); }
-  }
+  // "Nolkan semua kerning" kini di TopBar (App.onClearKern) — aksi font-wide global, di samping "Re-seed".
   async function expandKernClasses() {
     setKernBusy(true);
     try {
@@ -1821,10 +1799,7 @@ export function GlyphEditor({
               title="Gabungkan varian aksen (Á,Â,Ä…) ke kelas huruf dasarnya → kern dasar otomatis berlaku utk aksen. Sekali jalan; mengubah groups + kerning.">
               {kernBusy ? <Loader2 className="size-4 animate-spin" /> : <Combine className="size-4" />}Perluas kelas
             </button>
-            <button className="btn !py-1.5" onClick={runClearAllKern} disabled={clearKernBusy}
-              title="Nolkan SEMUA nilai kerning (kelas kern tetap ada → bisa diatur massal). Untuk mulai dari nol.">
-              {clearKernBusy ? <Loader2 className="size-4 animate-spin" /> : <X className="size-4" />}Nolkan semua
-            </button>
+            {/* "Nolkan semua kerning" dipindah ke TopBar (samping kiri "Re-seed") — aksi font-wide global. */}
             <span className="text-xs ml-auto whitespace-nowrap hidden lg:block" style={{ color: kernDirty ? "#e8a13a" : "var(--faint)" }}>
               {kernDirty
                 ? (kernScope === "smart"

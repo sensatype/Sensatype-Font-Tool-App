@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Download, RefreshCw, FolderOpen, Loader2 } from "lucide-react";
+import { Download, RefreshCw, FolderOpen, Loader2, Eraser } from "lucide-react";
 import { api } from "../api";
 import { can } from "../auth";
 import { useAuth } from "./AuthGate";
@@ -21,6 +21,7 @@ export function TopBar({
   syncing = false,
   onRespace,
   onHome,
+  onClearKern,
 }: {
   project: ProjectState;
   busy: boolean;
@@ -28,9 +29,11 @@ export function TopBar({
   syncing?: boolean;
   onRespace: (preset: string) => void;
   onHome: () => void;
+  onClearKern: () => Promise<void> | void;
 }) {
   const { role } = useAuth();
   const [exporting, setExporting] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   async function handleExport() {
     if (exporting) return;
@@ -106,6 +109,12 @@ export function TopBar({
             ))}
           </select>
         </label>
+        <button className="btn" disabled={busy || clearing}
+          title="Nolkan SEMUA nilai kerning (kelas kern/grup bentuk tetap ada → bisa diatur massal lewat scope Kelas). Berlaku permanen ke seluruh font."
+          onClick={async () => { if (clearing) return; setClearing(true); try { await onClearKern(); } finally { setClearing(false); } }}>
+          {clearing ? <Loader2 className="size-4 animate-spin" /> : <Eraser className="size-4" />}
+          Nolkan kern
+        </button>
         <button className="btn" disabled={busy} onClick={() => onRespace(project.preset ?? "display-serif")}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
           Re-seed

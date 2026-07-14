@@ -47,6 +47,14 @@ let backendProc = null;
 let mainWindow = null;
 let effectiveContentDir = null; // folder "isi" aktif (server/engine/dist) — baseline atau overlay
 let effectiveContentVer = 0;
+let contentChanged = false;     // versi isi berbeda dari muat terakhir → buang cache renderer
+
+// Penanda versi isi yang TERAKHIR dimuat ke jendela. Dipakai membuang cache HTTP renderer saat isi
+// berubah — kalau tidak, Chromium bisa menyajikan index.html LAMA dari cache disk walau shell+backend
+// sudah baru → UI "tak berubah" walau versi sudah naik (JEBAKAN yang membuat fitur baru seolah tak muncul).
+function loadedVerFile() { return path.join(app.getPath("userData"), "content-loaded.json"); }
+function readLoadedVer() { try { return Number(JSON.parse(fs.readFileSync(loadedVerFile(), "utf8")).ver); } catch { return -1; } }
+function writeLoadedVer(v) { try { fs.writeFileSync(loadedVerFile(), JSON.stringify({ ver: v })); } catch { /* ok */ } }
 
 // Versi isi dari meta.json sebuah content dir (-1 = tak ada/invalid).
 function contentVer(dir) {
@@ -307,10 +315,23 @@ function startAppLoad(attempt = 0) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   ping(`${BACKEND_ORIGIN}/api/health`).then((ok) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (ok) mainWindow.loadURL(APP_URL);
+    if (ok) loadAppUrl();
     else if (attempt < 170) setTimeout(() => startAppLoad(attempt + 1), 700);
     else mainWindow.loadURL(ERROR_PAGE);
   });
+}
+
+// Muat UI. Bila versi isi berubah sejak muat terakhir → buang cache HTTP renderer DULU supaya
+// index.html + bundle lama tak disajikan dari cache (jebakan "UI tak berubah setelah update").
+function loadAppUrl() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const go = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(APP_URL);
+    writeLoadedVer(effectiveContentVer); contentChanged = false; // cukup sekali per perubahan versi
+  };
+  if (contentChanged) {
+    try { mainWindow.webContents.session.clearCache().then(go, go); } catch { go(); }
+  } else go();
 }
 
 // Bawa jendela app ke depan (dipanggil renderer saat login selesai) — user tak perlu
@@ -346,6 +367,8 @@ if (!app.requestSingleInstanceLock()) {
     // early-return (backend lama masih hidup) & tak pernah memanggil resolveContentDir → dulu
     // update-isi ter-stage tak pernah aktif + effectiveContentVer mentok 0 (loop unduh).
     if (app.isPackaged) resolveContentDir();
+    // versi isi berubah sejak muat terakhir? → tandai agar cache renderer dibuang saat memuat UI.
+    if (app.isPackaged && effectiveContentVer !== readLoadedVer()) contentChanged = true;
     ensureBackend();   // spawn backend (tak diblok — createWindow menampilkan "Memuat…", startAppLoad menunggu health)
     createWindow();
     // Auto-cek pembaruan setelah UI siap, lalu BERKALA. Tanpa yang berkala, di macOS (tutup jendela
