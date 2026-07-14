@@ -1,7 +1,7 @@
 {
   "name": "sensatype-fonttool-ui",
   "private": true,
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Sensatype Font Tool — desain SVG/PDF glyph menjadi font OTF/TTF/WOFF",
   "author": "Sensatype Studio",
   "type": "module",
@@ -12,12 +12,13 @@
     "preview": "vite preview",
     "electron": "electron electron/main.cjs",
     "electron:dev": "ELECTRON_RENDERER_URL=http://localhost:5173 electron electron/main.cjs",
-    "dist": "npm run build && electron-builder",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win",
-    "release": "npm run build && electron-builder --publish always"
+    "dist": "npm run build && bash ../scripts/build-content.sh && electron-builder",
+    "dist:mac": "npm run build && bash ../scripts/build-content.sh && electron-builder --mac",
+    "dist:win": "npm run build && bash ../scripts/build-content.sh && electron-builder --win",
+    "release": "npm run build && bash ../scripts/build-content.sh && electron-builder --publish always"
   },
   "dependencies": {
+    "adm-zip": "^0.5.18",
     "electron-updater": "^6.3.9",
     "lucide-react": "^0.544.0",
     "react": "^19.2.0",
@@ -37,23 +38,59 @@
   "build": {
     "appId": "com.sensatype.fonttool",
     "productName": "Sensatype Font Tool",
-    "directories": { "output": "release", "buildResources": "build" },
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
     "afterPack": "build/after-pack.cjs",
-    "files": ["dist/**/*", "electron/**/*", "package.json"],
-    "extraResources": [
-      { "from": "../backend-dist/sensatype-backend", "to": "backend", "filter": ["**/*"] },
-      { "from": "../engine", "to": "engine", "filter": ["**/*", "!__pycache__/**"] },
-      { "from": "dist", "to": "dist", "filter": ["**/*"] }
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
     ],
-    "publish": [{ "provider": "github", "owner": "sensatype", "repo": "Sensatype-Font-Tool-App" }],
+    "extraResources": [
+      {
+        "from": "../backend-dist/sensatype-backend",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../content",
+        "to": "content",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "sensatype",
+        "repo": "Sensatype-Font-Tool-App"
+      }
+    ],
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.graphics-design",
       "icon": "build/icon.png",
       "identity": null
     },
-    "dmg": { "title": "Sensatype Font Tool" },
-    "win": { "target": ["nsis"], "icon": "build/icon.png" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+    "dmg": {
+      "title": "Sensatype Font Tool"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

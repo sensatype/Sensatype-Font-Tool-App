@@ -28,6 +28,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # histori penuh → git rev-list --count (versi isi) benar
 
       # ── Backend Python beku (PyInstaller) ──────────────────────────────────
       - uses: actions/setup-python@v5
@@ -58,4 +60,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npm run build
+          bash ../scripts/build-content.sh
           npx electron-builder ${{ matrix.ebflag }} --publish always

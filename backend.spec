@@ -29,12 +29,16 @@ hiddenimports += [
 ]
 
 a = Analysis(
-    ["server/_run.py"],
+    ["run_backend.py"],
     pathex=["."],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    excludes=["tkinter", "matplotlib", "PyQt5", "PyQt6", "PySide2", "PySide6", "IPython", "pytest"],
+    # `server` & modul engine SENGAJA TIDAK dibekukan — dimuat runtime dari content dir
+    # (agar bisa di-update tanpa reinstall). Library-nya tetap dibekukan (collect_all di atas).
+    excludes=["server", "smoke_test", "htls", "kerning", "presets", "specimen_split",
+              "features", "variable", "simplify",
+              "tkinter", "matplotlib", "PyQt5", "PyQt6", "PySide2", "PySide6", "IPython", "pytest"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

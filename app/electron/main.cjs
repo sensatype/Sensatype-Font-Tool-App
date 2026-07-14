@@ -8,7 +8,7 @@
 //  - Renderer terisolasi: contextIsolation ON, nodeIntegration OFF, sandbox ON.
 //  - Callback login = loopback GET /api/auth/callback yang dilayani uvicorn (same-origin
 //    dgn UI di mode prod → tanpa isu CORS/CSRF).
-const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -45,6 +45,46 @@ const ERROR_PAGE = "data:text/html;charset=utf-8," + encodeURIComponent(
 
 let backendProc = null;
 let mainWindow = null;
+let effectiveContentDir = null; // folder "isi" aktif (server/engine/dist) — baseline atau overlay
+let effectiveContentVer = 0;
+
+// Versi isi dari meta.json sebuah content dir (-1 = tak ada/invalid).
+function contentVer(dir) {
+  try { return Number(JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8")).content) || 0; }
+  catch { return -1; }
+}
+
+// Tentukan content dir aktif (mode terpasang):
+//  1) Terapkan hasil "update isi" sesi lalu: userData/content-staging → userData/content.
+//  2) Pilih versi TERTINGGI antara baseline installer (resources/content) & overlay (userData/content).
+//     → installer baru otomatis menggantikan overlay lama; update isi dipakai sampai installer baru.
+function resolveContentDir() {
+  const baseline = path.join(process.resourcesPath, "content");
+  const overlay = path.join(app.getPath("userData"), "content");
+  const staging = path.join(app.getPath("userData"), "content-staging");
+  if (fs.existsSync(path.join(staging, "meta.json"))) {
+    try { fs.rmSync(overlay, { recursive: true, force: true }); fs.renameSync(staging, overlay); }
+    catch (e) { console.error("[content] gagal terapkan staging", e); try { fs.rmSync(staging, { recursive: true, force: true }); } catch { /* ok */ } }
+  }
+  const bV = contentVer(baseline), oV = contentVer(overlay);
+  const dir = (oV > bV) ? overlay : baseline;
+  effectiveContentDir = dir;
+  effectiveContentVer = Math.max(bV, oV, 0);
+  return dir;
+}
+
+// Cek + stage "update isi" (ringan). Return status: none|staged|needsApp|error.
+async function checkContent() {
+  if (!app.isPackaged) return "none";
+  try {
+    const { checkContentUpdate } = require("./content-update.cjs");
+    const r = await checkContentUpdate({ currentContentVer: effectiveContentVer });
+    if (r.status === "staged") {
+      try { new Notification({ title: "Sensatype Font Tool", body: "Pembaruan siap — aktif otomatis saat aplikasi dibuka lagi." }).show(); } catch { /* ok */ }
+    }
+    return r.status;
+  } catch (e) { console.error("[content]", e); return "error"; }
+}
 
 function ping(url) {
   return new Promise((resolve) => {
@@ -83,10 +123,11 @@ async function ensureBackend() {
     cmd = path.join(process.resourcesPath, "backend", bin);
     args = ["--host", "127.0.0.1", "--port", String(BACKEND_PORT)];
     cwd = process.resourcesPath;
-    // engine/ & UI dist dikirim sebagai FILE NYATA di resources/ (bukan dibekukan ke bundle),
-    // jadi resolusi __file__ modul engine + data JSON-nya tetap benar.
-    env.SENSATYPE_ENGINE_DIR = path.join(process.resourcesPath, "engine");
-    env.SENSATYPE_DIST_DIR = path.join(process.resourcesPath, "dist");
+    // "Isi" (server+engine+dist) dimuat dari content dir aktif → bisa di-update tanpa reinstall.
+    const cdir = resolveContentDir();
+    env.SENSATYPE_CONTENT_DIR = cdir;          // run_backend menaruhnya di sys.path → import server dari sini
+    env.SENSATYPE_ENGINE_DIR = path.join(cdir, "engine");
+    env.SENSATYPE_DIST_DIR = path.join(cdir, "dist");
     // Data yang bisa berubah HARUS di lokasi writable (di dalam bundle app = read-only).
     env.SENSATYPE_PROJECTS_DIR = path.join(app.getPath("userData"), "projects");
     env.SENSATYPE_LEGACY_WORKSPACE = path.join(app.getPath("userData"), "workspace");
@@ -235,8 +276,12 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu();
     ensureBackend();   // spawn backend (tak diblok — createWindow menampilkan "Memuat…", startAppLoad menunggu health)
     createWindow();
-    // Auto-cek pembaruan sekali setelah UI siap (senyap bila sudah terbaru / tak terpasang).
-    setTimeout(() => checkForUpdates(false), 5000);
+    // Auto-cek pembaruan setelah UI siap: dahulukan "update isi" (ringan). Kalau tak ada isi baru
+    // atau isi butuh installer lebih baru → cek saluran installer penuh.
+    setTimeout(async () => {
+      const st = await checkContent();
+      if (st !== "staged") checkForUpdates(false);
+    }, 5000);
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
 }

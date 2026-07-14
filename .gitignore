@@ -26,3 +26,8 @@ svg/
 
 # cache build TS
 *.tsbuildinfo
+
+# artefak content update
+content/
+content.zip
+content.json
