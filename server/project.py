@@ -244,7 +244,7 @@ class Project:
         spec = tmp / "_specimen.svg"
         spec.write_bytes(svg_bytes)
         self._split(spec, gdir, layout, rows)
-        self._build_ufo_at(gdir, tmp / "project.ufo", family, style, preset, fit_ink=True)
+        self._build_ufo_at(gdir, tmp / "project.ufo", family, style, preset, fit_ink=True, zero_kern=True)
         self._swap_root(tmp)  # sukses → ganti workspace lama
         meta = {"family": family, "style": style, "upm": 1000, "preset": preset,
                 "layout": layout, "rows": rows,
@@ -270,7 +270,7 @@ class Project:
             gdir.mkdir(parents=True)
             for name, data in files:
                 (gdir / name).write_bytes(data)
-            self._build_ufo_at(gdir, tmp / "project.ufo", fam, sty, pre, fit_ink=True)  # gagal → tmp dibuang, root utuh
+            self._build_ufo_at(gdir, tmp / "project.ufo", fam, sty, pre, fit_ink=True, zero_kern=True)  # gagal → tmp dibuang, root utuh
             meta = {"family": fam, "style": sty, "upm": 1000, "preset": pre, "layout": None,
                     "rows": "upper,lower",
                     "masters": [{"value": None, "ufo": "project.ufo", "name": sty}], "axis": None}
@@ -287,7 +287,7 @@ class Project:
         tmp_ufo = self.root / "project_new.ufo"
         if tmp_ufo.exists():
             shutil.rmtree(tmp_ufo)
-        self._build_ufo_at(self.glyph_dir, tmp_ufo, fam, sty, pre, fit_ink=True)
+        self._build_ufo_at(self.glyph_dir, tmp_ufo, fam, sty, pre, fit_ink=True, zero_kern=True)
         if self.ufo_path.exists():
             shutil.rmtree(self.ufo_path)
         tmp_ufo.rename(self.ufo_path)
@@ -556,7 +556,7 @@ class Project:
         self._set_progress(15, "Membangun font…")
         # build_ufo melapor 0..1 → petakan ke 15..80% (tahap terberat: bersih kontur, spacing, kerning)
         self._build_ufo_at(gdir, tmp / "project.ufo", family, style, preset,
-                           progress=lambda frac, label: self._set_progress(15 + int(65 * frac), label), fit_ink=True)
+                           progress=lambda frac, label: self._set_progress(15 + int(65 * frac), label), fit_ink=True, zero_kern=True)
         self._swap_root(tmp)  # sukses → ganti workspace lama (staging lama ikut terhapus)
         meta = {"family": family, "style": style, "upm": 1000, "preset": preset, "layout": None,
                 "rows": None, "masters": [{"value": None, "ufo": "project.ufo", "name": style}], "axis": None}
@@ -572,17 +572,25 @@ class Project:
         rows_spec = tuple(r.strip() for r in (rows or "upper,lower").split(","))
         specimen_split.split(spec, out_dir, rows_spec=rows_spec, layout=lay)
 
-    def _build_ufo_at(self, glyph_dir, ufo_path, family, style, preset, progress=None, fit_ink=False):
+    def _build_ufo_at(self, glyph_dir, ufo_path, family, style, preset, progress=None,
+                      fit_ink=False, zero_kern=False):
         svgs = sorted(Path(glyph_dir).glob("*.svg"))
         smoke_test.build_ufo(svgs, ufo_path, upm=1000, baseline_ratio=0.8,
                              family=family, style=style, autospace=True, kern=True, preset=preset,
                              progress=progress)
-        # fit_ink: rapatkan batas kiri/kanan tiap glyph ke node terluar (LSB=RSB=0) segera setelah
-        # dibangun — dipakai di jalur IMPORT (pilihan user: otomatis setiap import). Re-seed/respace
-        # TIDAK fit (fit_ink=False) → tetap memakai spacing preset.
-        if fit_ink:
+        # Jalur IMPORT (pilihan user): mulai bersih agar mudah diatur —
+        #   fit_ink  : batas kiri/kanan tiap glyph ke node terluar (LSB=RSB=0).
+        #   zero_kern: SEMUA nilai kerning = 0 (grup/kelas bentuk TETAP → bisa diatur massal via "Kelas").
+        # Re-seed/respace TIDAK memakai keduanya (tetap spacing preset + kerning seed).
+        if fit_ink or zero_kern:
             f = ufoLib2.Font.open(ufo_path)
-            if _fit_to_ink(f):
+            changed = False
+            if fit_ink and _fit_to_ink(f):
+                changed = True
+            if zero_kern and f.kerning:
+                f.kerning.clear()  # nilai jadi 0; font.groups (kelas kern) sengaja DIPERTAHANKAN
+                changed = True
+            if changed:
                 f.save(ufo_path, overwrite=True)
 
     # --- variable font: masters & axis ------------------------------------
