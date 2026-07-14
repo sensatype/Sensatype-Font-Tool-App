@@ -1,7 +1,7 @@
 {
   "name": "sensatype-fonttool-ui",
   "private": true,
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "Sensatype Font Tool — desain SVG/PDF glyph menjadi font OTF/TTF/WOFF",
   "author": "Sensatype Studio",
   "type": "module",

@@ -8,7 +8,7 @@
 //  - Renderer terisolasi: contextIsolation ON, nodeIntegration OFF, sandbox ON.
 //  - Callback login = loopback GET /api/auth/callback yang dilayani uvicorn (same-origin
 //    dgn UI di mode prod → tanpa isu CORS/CSRF).
-const { app, BrowserWindow, Menu, Notification, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -74,13 +74,24 @@ function resolveContentDir() {
 }
 
 // Cek + stage "update isi" (ringan). Return status: none|staged|needsApp|error.
-async function checkContent() {
-  if (!app.isPackaged) return "none";
+async function checkContent(manual = false) {
+  if (!app.isPackaged) { if (manual) dialog.showMessageBox({ type: "info", message: "Mode pengembangan", detail: "Update isi hanya di aplikasi terpasang." }); return "none"; }
   try {
     const { checkContentUpdate } = require("./content-update.cjs");
     const r = await checkContentUpdate({ currentContentVer: effectiveContentVer });
+    if (manual && (r.status === "none" || r.status === "needsApp")) {
+      dialog.showMessageBox({ type: "info", message: "Isi sudah terbaru", detail: `Versi isi ${effectiveContentVer}.` });
+    }
     if (r.status === "staged") {
-      try { new Notification({ title: "Sensatype Font Tool", body: "Pembaruan siap — aktif otomatis saat aplikasi dibuka lagi." }).show(); } catch { /* ok */ }
+      // Tawarkan RESTART sekarang → menerapkan update seketika (menghindari jebakan macOS:
+      // menutup jendela ≠ keluar app, jadi update tak pernah diterapkan). Restart = whenReady
+      // jalan lagi → resolveContentDir menukar staging → content baru aktif.
+      const resp = await dialog.showMessageBox({
+        type: "info", buttons: ["Mulai ulang sekarang", "Nanti"], defaultId: 0, cancelId: 1,
+        message: "Pembaruan siap dipasang",
+        detail: "Perbaikan & fitur terbaru sudah diunduh. Mulai ulang aplikasi untuk menerapkannya?",
+      });
+      if (resp.response === 0) { app.relaunch(); app.quit(); }
     }
     return r.status;
   } catch (e) { console.error("[content]", e); return "error"; }
@@ -174,7 +185,7 @@ function buildMenu() {
     {
       label: "Bantuan",
       submenu: [
-        { label: "Periksa Pembaruan…", click: () => checkForUpdates(true) },
+        { label: "Periksa Pembaruan…", click: async () => { const s = await checkContent(true); if (s !== "staged") checkForUpdates(true); } },
       ],
     },
   ];

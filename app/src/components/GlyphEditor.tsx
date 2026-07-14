@@ -136,12 +136,11 @@ export function GlyphEditor({
   const smartSkipRef = useRef(false); // one-shot: bump fontV berikut berasal dari apply smart kita → jangan hitung ulang saran
   const kernInfoRef = useRef<KernInfo | null>(null); kernInfoRef.current = kernInfo;
   const pendingKern = useRef<number | null>(null); // nilai kern yg BARU kita tulis → refetch echo tak menimpa nilai live
-  // scope "Semuanya" = DELTA geser semua nilai kerning tersimpan (bake). Mulai 0; pratinjau di
-  // kanvas; ditulis permanen ke SEMUA pasangan saat Terapkan (tanpa terkecuali).
-  // "Geser semua" = DELTA transien (0-based), BUKAN nilai tracking. Tak disinkron ke project.tracking
-  // (dulu ada `useEffect(()=>setTrackVal(tracking))` — itu me-reset delta saat tracking berubah = bug
-  // "Semuanya kembali ke awal"). Delta hanya diubah stage/apply/cancel/keluar-mode.
-  const [trackVal, setTrackVal] = useState(0);
+  // scope "Semuanya" = TRACKING GLOBAL (letter-spacing): nilai ABSOLUT & PERSISTEN yang berlaku
+  // ke SEMUA pasangan (bukan hanya yang ber-kern) — live di preview (CSS letter-spacing) & di-bake
+  // saat export. trackVal = nilai staged; disinkron dari project.tracking KECUALI saat sedang diedit.
+  const [trackVal, setTrackVal] = useState(tracking);
+  useEffect(() => { if (!kernDirtyRef.current) setTrackVal(tracking); }, [tracking]);
   const [kernBusy, setKernBusy] = useState(false); // proses perluas group
   const [clearKernBusy, setClearKernBusy] = useState(false); // proses nolkan semua kerning
   const [partnerData, setPartnerData] = useState<{ path: string; advance: number } | null>(null);
@@ -263,15 +262,13 @@ export function GlyphEditor({
   // nama kiri/kanan pasangan (tergantung sisi glyph aktif)
   const kernLeft = kernSide === "left" ? kernSelfName : kernPartnerName;
   const kernRight = kernSide === "left" ? kernPartnerName : kernSelfName;
-  // pasangan aktif punya kern tersimpan? (dipakai pratinjau "Geser semua" agar jujur)
-  const kernHasStored = !!kernInfo && (kernInfo.classValue != null || kernInfo.pairValue != null);
   // nilai kern utk scope aktif (pasangan → pairValue; class/smart → classValue sbg baseline)
   const kernScoped = (k: KernInfo | null, scope: "all" | "class" | "pair" | "smart") =>
     !k ? 0 : (scope === "pair" ? (k.pairValue ?? 0) : (k.classValue ?? 0));
   // pasangan berganti → reset guard echo + buang nilai tertahan. Ref di-sync SINKRON:
   // efek smart di bawah berjalan pada commit yang sama & membaca ref ini — kalau hanya setState,
   // ref masih berisi dirty lama → computeSmart terlewat → saran smart tak pernah dihitung.
-  useEffect(() => { pendingKern.current = null; smartSkipRef.current = false; kernDirtyRef.current = false; setKernDirty(false); setTrackVal(0); }, [kernLeft, kernRight]); // reset delta "Geser semua" juga → tak nyangkut lintas pasangan
+  useEffect(() => { pendingKern.current = null; smartSkipRef.current = false; kernDirtyRef.current = false; setKernDirty(false); }, [kernLeft, kernRight]); // tracking global tak per-pasangan → trackVal tak disentuh
   // ambil info kern saat pasangan berubah — HANYA di mode Kerning (hemat: commit node/spasi
   // di mode lain tak perlu memicu fetch kern; masuk mode Kerning → fetch segar via dep `mode`)
   useEffect(() => {
@@ -287,7 +284,7 @@ export function GlyphEditor({
   // ganti scope → nilai tertahan scope lama SELALU dibuang (sync ref: efek smart di bawah berjalan
   // pada commit yang sama & membacanya — tanpa ini, draft kelas/pasangan nyangkut sbg "saran Smart" palsu).
   useEffect(() => {
-    kernDirtyRef.current = false; setKernDirty(false); setTrackVal(0); // buang delta "Geser semua" saat pindah scope
+    kernDirtyRef.current = false; setKernDirty(false); setTrackVal(tracking); // "Semuanya" tampil tracking tersimpan
     if (kernScope === "smart") return; // saran dihitung efek smart di bawah
     setKernVal(kernScoped(kernInfoRef.current, kernScope));
   }, [kernScope]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -383,37 +380,29 @@ export function GlyphEditor({
   // saat masuk lagi, krn refetch di-skip oleh guard pendingKern.)
   useEffect(() => {
     if (mode !== "kerning" && kernDirtyRef.current) {
-      kernDirtyRef.current = false; setKernDirty(false); setTrackVal(0);
+      kernDirtyRef.current = false; setKernDirty(false); setTrackVal(tracking);
       pendingKern.current = null;
       setKernVal(kernScoped(kernInfoRef.current, kernScopeRef.current));
     }
-  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps  // (dulu ada dep `tracking` mati → efek refire tiap reload project)
+  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
   // STAGE: seret kanvas / ketik angka → pratinjau live + tandai "belum ditetapkan" (tak menulis apa pun)
   function stageKern(v: number) {
-    if (kernScope === "all") { setTrackVal(v); setKernDirty(v !== 0); return; }
+    if (kernScope === "all") { setTrackVal(v); setKernDirty(v !== tracking); return; }
     setKernVal(v); setKernDirty(v !== kernScoped(kernInfoRef.current, kernScope));
   }
-  // TERAPKAN: tulis nilai tertahan ke font (tracking global / kern kelas / exception pasangan)
+  // TERAPKAN: tulis nilai tertahan (tracking global / kern kelas / exception pasangan)
   function applyKern() {
     if (kernScope === "all") {
-      // BAKE: geser SEMUA nilai kerning tersimpan sebesar delta — permanen, tanpa terkecuali.
-      const dlt = Math.round(trackVal);
-      setKernDirty(false);
-      if (!dlt) return;
-      if (!confirm(`Geser SEMUA nilai kerning tersimpan sebesar ${dlt > 0 ? "+" : ""}${dlt}?\n\n` +
-        "Berlaku ke semua pasangan tanpa terkecuali (permanen — terlihat di daftar kerning & ikut export). " +
-        "Untuk membalikkan: terapkan nilai kebalikannya.")) return;
-      serial(() => api.shiftAllKern(dlt))
-        .then(() => { kernCache.current = {}; setTrackVal(0); onKern?.(); setProofTick((t) => t + 1); })
-        .catch((e) => alert("Geser semua gagal: " + ((e as Error).message || e)));
-      return;
+      // "Semuanya" = tracking global ABSOLUT: berlaku ke SEMUA pasangan (live preview + bake export).
+      // Non-destruktif (tak mengubah kerning) & PERSISTEN (field tetap menunjukkan nilainya).
+      onTracking?.(Math.round(trackVal)); setKernDirty(false); return;
     }
     if (kernScope === "smart") smartSkipRef.current = true; // bump fontV hasil apply ini jangan memicu hitung-ulang yang menimpa nilai baru
     commitKern(kernVal); setKernDirty(false);
   }
   // BATAL: buang nilai tertahan, kembali ke nilai tersimpan
   function cancelKern() {
-    if (kernScope === "all") setTrackVal(0); // buang delta yang belum diterapkan
+    if (kernScope === "all") setTrackVal(tracking); // kembali ke tracking tersimpan
     else setKernVal(kernScoped(kernInfoRef.current, kernScope));
     setKernDirty(false);
   }
@@ -1401,11 +1390,9 @@ export function GlyphEditor({
               right={kernSide === "left"
                 ? (partnerData ? { path: partnerData.path, comps: [], advance: partnerData.advance, isCurrent: false } : null)
                 : (kernSelfName === name ? { path, comps, advance: d.advance, isCurrent: true } : (selfData ? { path: selfData.path, comps: [], advance: selfData.advance, isCurrent: false } : null))}
-              // "all"/Geser semua: pratinjau JUJUR — base = kern ter-resolusi pasangan ini; delta
-              // hanya tampil bila pasangan PUNYA kern tersimpan (shift-all cuma menggeser yang ada,
-              // tak membuat kern baru). Pasangan tanpa kern → tak bergerak (sesuai hasil Terapkan).
-              kern={kernScope === "all" ? (kernInfo?.value ?? 0) : kernVal}
-              tracking={kernScope === "all" ? (kernHasStored ? trackVal : 0) : tracking}
+              // "Semuanya" = tracking global → berlaku ke SEMUA pasangan (letter-spacing). Preview:
+              // trackVal ditambahkan seragam ke gap pasangan mana pun (jujur — semua ikut saat Terapkan).
+              kern={kernVal} tracking={kernScope === "all" ? trackVal : tracking}
               editValue={kernScope === "all" ? trackVal : kernVal}
               onEdit={kernScope === "all" ? setTrackVal : setKernVal}
               onCommit={stageKern} // lepas seretan → nilai TERTAHAN (pratinjau); tulis saat "Terapkan"
@@ -1769,12 +1756,12 @@ export function GlyphEditor({
             {/* satu field: "Semuanya"→tracking global · "Kelas"/"Pasangan"→kern pasangan.
                 Nilai DITAHAN dulu (amber = belum ditetapkan) → tulis saat "Terapkan". */}
             {kernScope === "all"
-              ? <Num label={kernDirty ? "Geser semua*" : "Geser semua"} value={trackVal} color={kernDirty ? "#e8a13a" : "var(--accent)"} onCommit={stageKern} title="Geser SEMUA nilai kerning tersimpan (em) — tanpa terkecuali, permanen setelah Terapkan. + renggang, − rapat. Pratinjau di kanvas." />
+              ? <Num label={kernDirty ? "Spasi semua*" : "Spasi semua"} value={trackVal} color={kernDirty ? "#e8a13a" : "var(--accent)"} onCommit={stageKern} title="Spasi global (em) — jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning. + renggang, − rapat. Nilai persisten; ikut export." />
               : <Num label={(kernScope === "smart" ? "Smart" : "Kern") + (kernDirty ? "*" : "")} value={kernVal} color={kernDirty ? "#e8a13a" : "var(--good)"} onCommit={stageKern} title="Nilai kern (em); + renggang, − rapat. Smart = saran optikal dari bentuk. Klik Terapkan utk menyimpan." />}
             {/* scope + nilai TERSIMPAN per level → jelas level mana yang punya nilai apa */}
             <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Semuanya = geser semua nilai kerning sekaligus (bake permanen) · Kelas = semua glyph se-grup · Pasangan = pasangan ini saja (exception) · Smart = saran kern optikal dari bentuk outline. Angka kecil = nilai tersimpan level itu.">
               {(["all", "class", "pair", "smart"] as const).map((s) => {
-                const sv = s === "class" ? kernInfo?.classValue ?? null : s === "pair" ? kernInfo?.pairValue ?? null : null;
+                const sv = s === "all" ? (tracking || null) : s === "class" ? kernInfo?.classValue ?? null : s === "pair" ? kernInfo?.pairValue ?? null : null;
                 const label = s === "all" ? "Semuanya" : s === "class" ? "Kelas" : s === "pair" ? "Pasangan" : "Smart";
                 return (
                   <button key={s} className="text-xs px-2 py-1 rounded-md font-medium flex items-center gap-1" onClick={() => setKernScope(s)}
@@ -1844,7 +1831,7 @@ export function GlyphEditor({
                 : kernScope === "smart"
                 ? "Smart = kern optikal dari bentuk outline (lurus/bulat/menjorok/diagonal menyesuaikan). Pilih pasangan → saran muncul."
                 : kernScope === "all"
-                ? "Geser SEMUA nilai kerning tersimpan sekaligus (tanpa terkecuali) — permanen setelah Terapkan"
+                ? "Spasi global → jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning · persisten & ikut export"
                 : kernScope === "class"
                 ? (kernInfo?.leftGroup || kernInfo?.rightGroup
                   ? `Kelas ${(kernInfo?.leftGroup ?? kernLeft ?? "").replace("public.kern1.", "")} · ${(kernInfo?.rightGroup ?? kernRight ?? "").replace("public.kern2.", "")} → semua se-grup ikut`
