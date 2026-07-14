@@ -51,6 +51,7 @@ export function GlyphEditor({
   onTracking,
   onKern,
   onChanged,
+  onReload,
 }: {
   name: string | null;
   glyphNames?: string[];
@@ -60,6 +61,7 @@ export function GlyphEditor({
   onTracking?: (v: number) => void;
   onKern?: () => void; // sinkron kern: bump editV (editor+panel refetch getKerning) + jadwalkan recompile webfont
   onChanged: (g: Glyph) => void;
+  onReload?: () => Promise<void>; // muat ulang SELURUH project (dipakai operasi font-wide: rapatkan semua)
 }) {
   const [d, setD] = useState<GlyphDetail | null>(null);
   // mode bertahan saat GANTI GLYPH: komponen di-remount per glyph (key=nama), jadi state biasa
@@ -121,6 +123,7 @@ export function GlyphEditor({
   const [smartBusy, setSmartBusy] = useState(false); // sedang menghitung saran smart kern
   const [autoBusy, setAutoBusy] = useState(false); // sedang menjalankan auto-kern seluruh font
   const [autoMenu, setAutoMenu] = useState(false); // menu pilihan auto-kern (isi kosong / timpa semua)
+  const [fitBusy, setFitBusy] = useState(false); // sedang merapatkan SEMUA glyph ke ink
   // mode Rapikan (bersihkan node/handle berlebih tanpa merusak bentuk)
   const [cleanBusy, setCleanBusy] = useState(false);
   const [cleanTol, setCleanTol] = useState(3);   // toleransi simpangan bentuk (unit em)
@@ -320,6 +323,33 @@ export function GlyphEditor({
     } finally {
       setAutoBusy(false);
     }
+  }
+  // RAPATKAN SEMUA: sidebearing tiap glyph menempel ke node terluar (LSB=0, RSB=0). Font-wide →
+  // muat ulang seluruh project setelahnya. Permanen (konfirmasi dulu).
+  async function runFitAll() {
+    if (fitBusy) return;
+    if (!confirm(
+      "Rapatkan SEMUA glyph ke ink?\n\n" +
+      "Batas kiri/kanan setiap glyph akan menempel ke node terluar (LSB=0, RSB=0, advance = lebar ink). " +
+      "Berlaku permanen ke seluruh font.\n\n" +
+      "Setelah ini glyph tak punya spasi samping — atur jarak lewat preset/kerning bila perlu.")) return;
+    setFitBusy(true);
+    try {
+      const r = await serial(() => api.fitAll());
+      await onReload?.();
+      // glyph aktif: effect load hanya keyed [name] (tak refire di fit-all) → refetch manual biar tak stale
+      if (name) {
+        const g = await api.glyph(name);
+        bbox0.current = { xMin: g.lsb, xMax: g.advance - g.rsb };
+        setD(g); setContours(g.outline); contoursRef.current = g.outline;
+        setLsb(g.lsb); setRsb(g.rsb); setAnchors(g.anchors ?? []); setComps(g.components ?? []);
+        const snap0 = snapOf(g, g.outline, g.lsb, g.rsb);
+        hist.current = [snap0]; hi.current = 0; lastPersisted.current = snap0; updFlags();
+      }
+      alert(`Selesai: ${r.fitted} glyph dirapatkan ke ink${r.skipped ? ` · ${r.skipped} dilewati (tanpa ink)` : ""}.`);
+    } catch (e) {
+      alert("Rapatkan semua gagal: " + ((e as Error).message || e));
+    } finally { setFitBusy(false); }
   }
   // RAPIKAN: hapus node/handle yang tak dibutuhkan — bentuk dipertahankan (toleransi di slider).
   // Hasil masuk histori (⌘Z membatalkan) & tersinkron ke semua mode (cache Text, grid, panel).
@@ -1584,6 +1614,12 @@ export function GlyphEditor({
             <Num label="LSB" value={lsb} color="var(--accent)" onCommit={(v) => commitSpace(v, rsb)} />
             <Num label="RSB" value={rsb} color="var(--good)" onCommit={(v) => commitSpace(lsb, v)} />
             <Num label="Advance" value={Math.round(curAdvance)} color="var(--glyph)" onCommit={commitAdvance} title="Lebar maju (advance); ubah → RSB diatur otomatis agar glyph tetap di tempat" />
+            <button className="btn !py-1.5" onClick={() => commitSpace(0, 0)} title="Rapatkan batas kiri/kanan glyph INI ke node terluar (LSB=0, RSB=0). ⌘Z membatalkan.">
+              <Ruler className="size-4" />Ke ink
+            </button>
+            <button className="btn !py-1.5" onClick={runFitAll} disabled={fitBusy} title="Rapatkan SEMUA glyph ke ink sekaligus (LSB=0, RSB=0, advance = lebar ink). Permanen — konfirmasi dulu.">
+              {fitBusy ? <Loader2 className="size-4 animate-spin" /> : <Ruler className="size-4" />}Semua
+            </button>
             <div className="h-9 w-px self-end mb-1" style={{ background: "var(--border)" }} />
             <Num label="Base ±" value={0} color="var(--accent)" compact resetOnCommit onCommit={(v) => shiftGlyphY(v)} title="Geser glyph vertikal (em); + naik, − turun" />
             <Num label="Cap" value={d.capHeight} color="var(--muted)" compact onCommit={(v) => commitMetric("capHeight", v)} />

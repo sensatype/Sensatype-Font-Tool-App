@@ -194,6 +194,15 @@ def get_project():
     return project.state()
 
 
+@app.post("/api/fit-all")
+def fit_all():
+    """Rapatkan sidebearing SEMUA glyph ke ink (LSB=0 & RSB=0)."""
+    try:
+        return project.fit_all(recompile=False)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Rapatkan semua gagal: {e}")
+
+
 @app.get("/api/layouts")
 def layouts():
     from server.project import ENGINE

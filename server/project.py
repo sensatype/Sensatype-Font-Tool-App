@@ -621,6 +621,39 @@ class Project:
 
     # --- edit metrik -------------------------------------------------------
     @_locked
+    def fit_all(self, recompile=False):
+        """Rapatkan sidebearing SEMUA glyph ke ink: LSB=0 & RSB=0 → batas kiri/kanan tiap
+        glyph menempel ke node terluar (advance = lebar ink). Order-independent & aman komposit:
+        pakai bounds ASLI + kompensasi offset komponen agar huruf beraksen tak bergeser relatif."""
+        font = self._font()
+        order = [n for n in font.glyphOrder if n != ".notdef" and n in font]
+        bounds = {}
+        for n in order:
+            b = font[n].getBounds(font)
+            if b is not None and b.xMax > b.xMin:  # ada ink; lewati glyph kosong (spasi)
+                bounds[n] = (b.xMin, b.xMax)
+        dx = {n: -xy[0] for n, xy in bounds.items()}
+        for n, (xMin, xMax) in bounds.items():
+            g = font[n]
+            d = dx[n]
+            if d:
+                for c in g:
+                    for p in c:
+                        p.x += d
+                for a in g.anchors:
+                    a.x += d
+            for comp in g.components:  # ikut geser +d, tapi base-nya juga digeser → kompensasi
+                t = list(comp.transformation)
+                t[4] += d - dx.get(comp.baseGlyph, 0)
+                comp.transformation = tuple(t)
+            g.width = round(xMax + d)
+        if bounds:
+            font.save(self.ufo_path, overwrite=True)
+            if recompile:
+                self.compile_static()
+        return {"fitted": len(bounds), "total": len(order), "skipped": len(order) - len(bounds)}
+
+    @_locked
     def set_spacing(self, name, lsb=None, rsb=None, recompile=True):
         """recompile=False → hanya tulis UFO (cepat); webfont di-recompile terpisah (debounce di UI)."""
         font = self._font()

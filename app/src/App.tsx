@@ -164,6 +164,7 @@ export function App() {
               patchGlyph(g);
               scheduleRecompile();    // webfont (grid/PreviewBar) menyusul sekali saat diam
             }}
+            onReload={async () => { await api.recompilePreview().catch(() => {}); await applyState(await api.getProject()); }}
           />
           <PreviewBar fontV={fontV} varSettings={varSettings} tracking={project.tracking ?? 0} />
         </div>

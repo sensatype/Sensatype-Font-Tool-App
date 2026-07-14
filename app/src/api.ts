@@ -102,6 +102,10 @@ export const api = {
       body: JSON.stringify({ ...body, recompile: false }),
     }).then(j<{ ascender: number; descender: number; capHeight: number; xHeight: number }>),
 
+  // Rapatkan sidebearing SEMUA glyph ke ink (LSB=0 & RSB=0) → batas = node terluar.
+  fitAll: () => fetch(`${BASE}/fit-all`, { method: "POST" })
+    .then(j<{ fitted: number; total: number; skipped: number }>),
+
   // Rapikan node/handle: hapus titik berlebih, bentuk dipertahankan (toleransi = simpangan maks, em)
   simplifyGlyph: (name: string, tolerance: number) =>
     fetch(`${BASE}/glyph/${encodeURIComponent(name)}/simplify`, {
