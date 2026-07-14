@@ -130,9 +130,21 @@ export function App() {
         setBusy={setBusy}
         syncing={syncing}
         onRespace={async (preset) => {
+          // Re-seed = BANGUN ULANG UFO dari SVG (project.respace → _build_ufo_at, autospace+kern seed)
+          // → SEMUA editan manual di level font tertimpa. Dipicu tombol "Re-seed" DAN dropdown Preset,
+          // jadi konfirmasi ditaruh di sini (satu titik). Batal → select kembali sendiri (nilai terikat
+          // ke project.preset yang tak berubah).
+          const p = preset || project.preset || "display-serif";
+          if (!confirm(
+            `Re-seed: bangun ulang font dari SVG dengan preset "${p}"?\n\n` +
+            "PERINGATAN — kerja manual Anda akan HILANG dan diganti hasil otomatis:\n" +
+            "• Kerning manual (semua nilai)\n" +
+            "• Spasi / sidebearing (LSB & RSB)\n" +
+            "• Editan outline (rapikan node / simplify) & anchor\n\n" +
+            "File SVG asli TIDAK berubah. Tindakan ini tidak bisa dibatalkan.")) return;
           setBusy(true);
           try {
-            await applyState(await api.respace(preset));
+            await applyState(await api.respace(p));
           } finally {
             setBusy(false);
           }
