@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Loader2, Trash2, Combine, Scissors, Eye, ArrowRight, ArrowLeft, Wand2, Eraser, Undo2, Redo2, Type, FolderOpen } from "lucide-react";
+import { Upload, Loader2, Trash2, Combine, Scissors, Eye, ArrowRight, ArrowLeft, Wand2, Eraser, Undo2, Redo2, Type, FolderOpen, Magnet, Check } from "lucide-react";
 import { api } from "../api";
 import { SpecimenCanvas } from "./SpecimenCanvas";
 import { AccountChip } from "./AccountChip";
@@ -22,6 +22,10 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
   const [drag, setDrag] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Magnet garis baseline/cap (dipakai SpecimenCanvas). State di sini karena tombolnya ada di
+  // toolbar langkah 2 (samping "Pisah"), bukan di kanvas. Default AKTIF, diingat antar-sesi.
+  const [snapOn, setSnapOn] = useState(() => localStorage.getItem("sc.snap") !== "0");
+  useEffect(() => { localStorage.setItem("sc.snap", snapOn ? "1" : "0"); }, [snapOn]);
 
   const kept = useMemo(() => (staging?.shapes ?? []).filter((s) => !s.excluded), [staging]);
 
@@ -188,6 +192,13 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
           <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("include", [...sel])}><Eye className="size-4" />Pulihkan</button>
           <button className="btn !py-1.5" disabled={sel.size < 2} onClick={() => op("merge", [...sel])}><Combine className="size-4" />Gabung</button>
           <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("split", [...sel])}><Scissors className="size-4" />Pisah</button>
+          <button className="btn !py-1.5" onClick={() => setSnapOn((v) => !v)}
+            style={{ background: snapOn ? "var(--accent)" : "transparent", color: snapOn ? "#fff" : "var(--muted)" }}
+            title={snapOn
+              ? "Magnet garis: AKTIF — baseline/cap menempel ke tepi DOMINAN glyph (alas/puncak rata), bukan ke overshoot huruf bulat (o, e, s, v). Tahan ⌘/Ctrl saat menyeret utk mematikan sementara."
+              : "Magnet garis: NONAKTIF — garis baseline/cap bebas digeser (klik utk mengaktifkan)"}>
+            <Magnet className="size-4" />Magnet
+          </button>
           <div className="h-5 w-px mx-1" style={{ background: "var(--border-2)" }} />
           <button className="btn !py-1.5" onClick={() => addGuide("baseline")}><span style={{ color: "#ff5b6e" }}>―</span> Baseline</button>
           <button className="btn !py-1.5" onClick={() => addGuide("cap")}><span style={{ color: "#5b9cff" }}>―</span> Cap</button>
@@ -203,6 +214,7 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
             setSel={setSel}
             onGuides={commitGuides}
             onMoveShapes={moveShapes}
+            snapOn={snapOn}
           />
         )}
         {err && <div className="px-4 py-2 text-bad text-sm">{err}</div>}
@@ -220,8 +232,9 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
       <div className="px-4 py-2.5 border-b flex items-center gap-3 flex-wrap" style={{ borderColor: "var(--border)", background: "var(--bg-2)" }}>
         <button className="btn !py-1.5" onClick={autoFill}><Wand2 className="size-4" />Otomatis (A–Z a–z 0–9 …)</button>
         <button className="btn !py-1.5" onClick={clearTokens}><Eraser className="size-4" />Kosongkan (manual)</button>
-        {/* Alt & Liga juga tersedia saat pemetaan → isi altStr/ligStr lalu klik "Otomatis" utk menyisipkan */}
-        <AltLigMenu alt={altStr} setAlt={setAltStr} lig={ligStr} setLig={setLigStr} />
+        {/* Alt & Liga saat pemetaan: tombol "Terapkan" di dalam menu LANGSUNG mengisi token
+            (onApply=autoFill) → tak perlu balik ke langkah Bersihkan agar terisi. */}
+        <AltLigMenu alt={altStr} setAlt={setAltStr} lig={ligStr} setLig={setLigStr} onApply={autoFill} />
         <div className="flex items-center gap-2 ml-auto">
           <input className="field !w-32 !py-1.5" value={family} onChange={(e) => setFamily(e.target.value)} placeholder="Family" />
           <input className="field !w-24 !py-1.5" value={style} onChange={(e) => setStyle(e.target.value)} placeholder="Style" />
@@ -276,8 +289,12 @@ function CommitOverlay({ pct, phase, count }: { pct: number; phase: string; coun
   );
 }
 
-// Menu input Alternate & Ligature (langkah 2). Nilai dipakai autoFill utk mengisi slot tengah urutan.
-function AltLigMenu({ alt, setAlt, lig, setLig }: { alt: string; setAlt: (s: string) => void; lig: string; setLig: (s: string) => void }) {
+// Menu input Alternate & Ligature. Nilai dipakai autoFill utk mengisi slot tengah urutan.
+// onApply (dipasang di langkah 3 "Petakan") → tombol konfirmasi yang LANGSUNG mengisi token,
+// jadi tak perlu balik ke langkah sebelumnya (atau menebak-nebak harus klik "Otomatis") dulu.
+function AltLigMenu({ alt, setAlt, lig, setLig, onApply }: {
+  alt: string; setAlt: (s: string) => void; lig: string; setLig: (s: string) => void; onApply?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const filled = alt.trim() || lig.trim();
   return (
@@ -304,8 +321,16 @@ function AltLigMenu({ alt, setAlt, lig, setLig }: { alt: string; setAlt: (s: str
             <p className="text-faint text-[11px] leading-relaxed">
               Disisipkan otomatis di urutan: <b>setelah simbol, sebelum multilingual</b>. Nama dibentuk:
               alternate → <code>Y.ss01</code> (huruf berulang naik .ss02…), ligature → <code>R_U</code>, <code>f_f_i</code>.
-              Klik <b>Lanjut: petakan</b> atau <b>Otomatis</b> untuk menerapkan.
+              {onApply
+                ? <> Klik <b>Terapkan</b> di bawah untuk langsung mengisi.</>
+                : <> Klik <b>Lanjut: petakan</b> untuk menerapkan.</>}
             </p>
+            {onApply && (
+              <button className="btn btn-accent w-full justify-center" onClick={() => { onApply(); setOpen(false); }}
+                title="Isi ulang token dari urutan otomatis + Alternate & Ligature di atas (menimpa isian token saat ini)">
+                <Check className="size-4" /> Terapkan
+              </button>
+            )}
           </div>
         </>
       )}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ZoomIn, ZoomOut, Maximize, Magnet } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
 import type { StagedGuide, StagingState } from "../types";
 
 const MIN_Z = 0.25, MAX_Z = 10; // 25%–1000%
@@ -43,12 +43,14 @@ export function SpecimenCanvas({
   setSel,
   onGuides,
   onMoveShapes,
+  snapOn,
 }: {
   staging: StagingState;
   sel: Set<number>;
   setSel: React.Dispatch<React.SetStateAction<Set<number>>>;
   onGuides: (guides: { y: number; type: string; linked?: boolean }[]) => void;
   onMoveShapes: (ids: number[], dx: number, dy: number) => void;
+  snapOn: boolean; // magnet garis — tombolnya di toolbar wizard (samping "Pisah"), state di ImportWizard
 }) {
   const [vx, vy, vw, vh] = staging.viewBox;
   const [guides, setGuides] = useState<StagedGuide[]>(staging.guides);
@@ -60,9 +62,6 @@ export function SpecimenCanvas({
   const zoom = view.zoom;
   const [marquee, setMarquee] = useState<{ sx: number; sy: number; cx: number; cy: number; n: number } | null>(null);
   const [moveOff, setMoveOff] = useState<{ dx: number; dy: number; ids: Set<number> } | null>(null);
-  // MAGNET garis: menempel ke tepi DOMINAN glyph (lihat clusterEdges). Default AKTIF.
-  const [snapOn, setSnapOn] = useState(() => localStorage.getItem("sc.snap") !== "0");
-  useEffect(() => { localStorage.setItem("sc.snap", snapOn ? "1" : "0"); }, [snapOn]);
   const [snapHit, setSnapHit] = useState<{ y: number; count: number; type: string } | null>(null); // indikator saat menempel
   const svgRef = useRef<SVGSVGElement>(null);
   const contRef = useRef<HTMLDivElement>(null);
@@ -428,14 +427,6 @@ export function SpecimenCanvas({
 
       <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-lg p-1"
         style={{ background: "var(--panel)", border: "1px solid var(--border)" }}>
-        <button className="btn !p-1.5" onClick={() => setSnapOn((v) => !v)}
-          style={{ color: snapOn ? "var(--accent)" : "var(--muted)" }}
-          title={snapOn
-            ? "Magnet AKTIF — garis menempel ke tepi DOMINAN glyph (alas/puncak rata), bukan ke overshoot huruf bulat. Tahan ⌘/Ctrl saat menyeret utk mematikan sementara."
-            : "Magnet MATI — garis bebas digeser"}>
-          <Magnet className="size-4" />
-        </button>
-        <div className="h-5 w-px" style={{ background: "var(--border-2)" }} />
         <button className="btn !p-1.5" onClick={() => zoomBtn(0.8)} title="Zoom out"><ZoomOut className="size-4" /></button>
         <span className="text-xs text-muted tabular-nums w-12 text-center">{Math.round(zoom * 100)}%</span>
         <button className="btn !p-1.5" onClick={() => zoomBtn(1.25)} title="Zoom in"><ZoomIn className="size-4" /></button>
