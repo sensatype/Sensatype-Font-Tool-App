@@ -461,6 +461,15 @@ def kern_shift_all(body: KernShift):
         raise HTTPException(400, f"Geser semua kerning gagal: {e}")
 
 
+@app.post("/api/kerning/clear-all")
+def kern_clear_all():
+    """Nolkan SEMUA nilai kerning (grup kelas dipertahankan)."""
+    try:
+        return project.clear_all_kerning(recompile=False)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Nolkan kerning gagal: {e}")
+
+
 class AutoKern(BaseModel):
     onlyEmpty: bool = True   # True = hanya isi pasangan yang belum ada kerning (tak menimpa)
     recompile: bool = False

@@ -138,9 +138,12 @@ export function GlyphEditor({
   const pendingKern = useRef<number | null>(null); // nilai kern yg BARU kita tulis → refetch echo tak menimpa nilai live
   // scope "Semuanya" = DELTA geser semua nilai kerning tersimpan (bake). Mulai 0; pratinjau di
   // kanvas; ditulis permanen ke SEMUA pasangan saat Terapkan (tanpa terkecuali).
+  // "Geser semua" = DELTA transien (0-based), BUKAN nilai tracking. Tak disinkron ke project.tracking
+  // (dulu ada `useEffect(()=>setTrackVal(tracking))` — itu me-reset delta saat tracking berubah = bug
+  // "Semuanya kembali ke awal"). Delta hanya diubah stage/apply/cancel/keluar-mode.
   const [trackVal, setTrackVal] = useState(0);
-  useEffect(() => { setTrackVal(tracking); }, [tracking]);
   const [kernBusy, setKernBusy] = useState(false); // proses perluas group
+  const [clearKernBusy, setClearKernBusy] = useState(false); // proses nolkan semua kerning
   const [partnerData, setPartnerData] = useState<{ path: string; advance: number } | null>(null);
   const [selfData, setSelfData] = useState<{ path: string; advance: number } | null>(null); // data glyph aktif pasangan bila ≠ glyph terpilih
   // TEXT mode: proofing teks bebas
@@ -260,13 +263,15 @@ export function GlyphEditor({
   // nama kiri/kanan pasangan (tergantung sisi glyph aktif)
   const kernLeft = kernSide === "left" ? kernSelfName : kernPartnerName;
   const kernRight = kernSide === "left" ? kernPartnerName : kernSelfName;
+  // pasangan aktif punya kern tersimpan? (dipakai pratinjau "Geser semua" agar jujur)
+  const kernHasStored = !!kernInfo && (kernInfo.classValue != null || kernInfo.pairValue != null);
   // nilai kern utk scope aktif (pasangan → pairValue; class/smart → classValue sbg baseline)
   const kernScoped = (k: KernInfo | null, scope: "all" | "class" | "pair" | "smart") =>
     !k ? 0 : (scope === "pair" ? (k.pairValue ?? 0) : (k.classValue ?? 0));
   // pasangan berganti → reset guard echo + buang nilai tertahan. Ref di-sync SINKRON:
   // efek smart di bawah berjalan pada commit yang sama & membaca ref ini — kalau hanya setState,
   // ref masih berisi dirty lama → computeSmart terlewat → saran smart tak pernah dihitung.
-  useEffect(() => { pendingKern.current = null; smartSkipRef.current = false; kernDirtyRef.current = false; setKernDirty(false); }, [kernLeft, kernRight]);
+  useEffect(() => { pendingKern.current = null; smartSkipRef.current = false; kernDirtyRef.current = false; setKernDirty(false); setTrackVal(0); }, [kernLeft, kernRight]); // reset delta "Geser semua" juga → tak nyangkut lintas pasangan
   // ambil info kern saat pasangan berubah — HANYA di mode Kerning (hemat: commit node/spasi
   // di mode lain tak perlu memicu fetch kern; masuk mode Kerning → fetch segar via dep `mode`)
   useEffect(() => {
@@ -274,14 +279,15 @@ export function GlyphEditor({
     if (!kernLeft || !kernRight || !glyphNames.includes(kernLeft) || !glyphNames.includes(kernRight)) { setKernInfo(null); setKernVal(0); return; }
     let cancel = false;
     api.getKerning(kernLeft, kernRight).then((k) => { if (!cancel) { setKernInfo(k); const sv = kernScoped(k, kernScopeRef.current);
-      if (sv !== pendingKern.current && !kernDirtyRef.current) setKernVal(sv); } }) // nilai tertahan JANGAN ditimpa refetch; scope dibaca dari ref (bisa berganti selagi fetch jalan)
+      if (sv !== pendingKern.current && !kernDirtyRef.current) setKernVal(sv);        // nilai tertahan JANGAN ditimpa refetch
+      else if (sv === pendingKern.current) pendingKern.current = null; } })            // echo tulisan sudah tiba → lepas guard (refetch berikut boleh masuk)
       .catch(() => { if (!cancel) { setKernInfo(null); setKernVal(0); } });
     return () => { cancel = true; };
   }, [mode, kernLeft, kernRight, fontV]); // eslint-disable-line react-hooks/exhaustive-deps  // fontV → refetch saat kern berubah
   // ganti scope → nilai tertahan scope lama SELALU dibuang (sync ref: efek smart di bawah berjalan
   // pada commit yang sama & membacanya — tanpa ini, draft kelas/pasangan nyangkut sbg "saran Smart" palsu).
   useEffect(() => {
-    kernDirtyRef.current = false; setKernDirty(false);
+    kernDirtyRef.current = false; setKernDirty(false); setTrackVal(0); // buang delta "Geser semua" saat pindah scope
     if (kernScope === "smart") return; // saran dihitung efek smart di bawah
     setKernVal(kernScoped(kernInfoRef.current, kernScope));
   }, [kernScope]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -381,7 +387,7 @@ export function GlyphEditor({
       pendingKern.current = null;
       setKernVal(kernScoped(kernInfoRef.current, kernScopeRef.current));
     }
-  }, [mode, tracking]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps  // (dulu ada dep `tracking` mati → efek refire tiap reload project)
   // STAGE: seret kanvas / ketik angka → pratinjau live + tandai "belum ditetapkan" (tak menulis apa pun)
   function stageKern(v: number) {
     if (kernScope === "all") { setTrackVal(v); setKernDirty(v !== 0); return; }
@@ -474,6 +480,28 @@ export function GlyphEditor({
       onChanged({ name: nm, unicode: res.unicode, char: res.char, advance: res.advance,
         lsb: res.lsb, rsb: res.rsb, contours: res.contours, category: res.category, empty: res.empty });
     }).catch(() => { /* abaikan */ });
+  }
+  // NOLKAN SEMUA KERNING: kosongkan seluruh nilai kerning (grup kelas tetap). Font-wide → reload.
+  async function runClearAllKern() {
+    if (clearKernBusy) return;
+    if (!confirm(
+      "Nolkan SEMUA nilai kerning?\n\n" +
+      "Semua pasangan jadi 0. Kelas kern (grup bentuk) tetap ada → bisa langsung diatur massal " +
+      "lewat scope \"Kelas\". Berlaku permanen ke seluruh font.")) return;
+    setClearKernBusy(true);
+    try {
+      const r = await serial(() => api.clearAllKern());
+      kernCache.current = {};
+      await onReload?.();
+      if (kernLeft && kernRight && glyphNames.includes(kernLeft) && glyphNames.includes(kernRight)) {
+        const k = await api.getKerning(kernLeft, kernRight);
+        setKernInfo(k); kernInfoRef.current = k; setKernVal(kernScoped(k, kernScope)); setKernDirty(false);
+      }
+      setProofTick((t) => t + 1);
+      alert(`${r.cleared} nilai kerning dinolkan (kelas kern dipertahankan).`);
+    } catch (e) {
+      alert("Nolkan gagal: " + ((e as Error).message || e));
+    } finally { setClearKernBusy(false); }
   }
   async function expandKernClasses() {
     setKernBusy(true);
@@ -1373,7 +1401,11 @@ export function GlyphEditor({
               right={kernSide === "left"
                 ? (partnerData ? { path: partnerData.path, comps: [], advance: partnerData.advance, isCurrent: false } : null)
                 : (kernSelfName === name ? { path, comps, advance: d.advance, isCurrent: true } : (selfData ? { path: selfData.path, comps: [], advance: selfData.advance, isCurrent: false } : null))}
-              kern={kernVal} tracking={kernScope === "all" ? trackVal : tracking}
+              // "all"/Geser semua: pratinjau JUJUR — base = kern ter-resolusi pasangan ini; delta
+              // hanya tampil bila pasangan PUNYA kern tersimpan (shift-all cuma menggeser yang ada,
+              // tak membuat kern baru). Pasangan tanpa kern → tak bergerak (sesuai hasil Terapkan).
+              kern={kernScope === "all" ? (kernInfo?.value ?? 0) : kernVal}
+              tracking={kernScope === "all" ? (kernHasStored ? trackVal : 0) : tracking}
               editValue={kernScope === "all" ? trackVal : kernVal}
               onEdit={kernScope === "all" ? setTrackVal : setKernVal}
               onCommit={stageKern} // lepas seretan → nilai TERTAHAN (pratinjau); tulis saat "Terapkan"
@@ -1799,6 +1831,10 @@ export function GlyphEditor({
             <button className="btn !py-1.5" onClick={expandKernClasses} disabled={kernBusy}
               title="Gabungkan varian aksen (Á,Â,Ä…) ke kelas huruf dasarnya → kern dasar otomatis berlaku utk aksen. Sekali jalan; mengubah groups + kerning.">
               {kernBusy ? <Loader2 className="size-4 animate-spin" /> : <Combine className="size-4" />}Perluas kelas
+            </button>
+            <button className="btn !py-1.5" onClick={runClearAllKern} disabled={clearKernBusy}
+              title="Nolkan SEMUA nilai kerning (kelas kern tetap ada → bisa diatur massal). Untuk mulai dari nol.">
+              {clearKernBusy ? <Loader2 className="size-4 animate-spin" /> : <X className="size-4" />}Nolkan semua
             </button>
             <span className="text-xs ml-auto whitespace-nowrap hidden lg:block" style={{ color: kernDirty ? "#e8a13a" : "var(--faint)" }}>
               {kernDirty
@@ -2349,14 +2385,19 @@ function ModeBtn({ active, onClick, icon, children }: any) {
 
 function Num({ label, value, color, onCommit, compact, disabled, title, resetOnCommit }: { label: string; value: number; color: string; onCommit: (v: number) => void; compact?: boolean; disabled?: boolean; title?: string; resetOnCommit?: boolean }) {
   const [v, setV] = useState(String(value));
-  useEffect(() => setV(String(value)), [value]);
+  const focused = useRef(false);
+  // JANGAN sinkron prop→input selagi field difokus/diketik: refetch/recompile latar bisa mengubah
+  // `value` di tengah ketikan → input "balik ke nilai awal". Sinkron HANYA saat tak difokus.
+  useEffect(() => { if (!focused.current) setV(String(value)); }, [value]);
   return (
     <label className="flex flex-col gap-1" title={title}>
       <span className="label" style={{ color }}>{label}</span>
       <input className={`field tabular-nums ${compact ? "!w-16" : "!w-24"}`} type="number" value={v} disabled={disabled}
         style={disabled ? { opacity: 0.5 } : undefined}
+        onFocus={() => { focused.current = true; }}
         onChange={(e) => setV(e.target.value)}
         onBlur={() => {
+          focused.current = false;
           if (disabled) return;
           // commit HANYA bila nilai berubah — blur biasa (klik pindah field / buka dropdown) tak
           // menulis apa pun; dulu selalu commit → nilai pasangan LAMA bisa tertulis ke pasangan baru.

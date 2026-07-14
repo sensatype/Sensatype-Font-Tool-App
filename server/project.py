@@ -834,11 +834,27 @@ class Project:
         if not d:
             return {"shifted": 0, "kerning": len(font.kerning)}
         for k in list(font.kerning.keys()):
-            font.kerning[k] = int(font.kerning[k]) + d
+            # round (bukan int→truncate) + clamp ke rentang GPOS int16 (fontmake menolak di luar itu)
+            v = round(font.kerning[k]) + d
+            font.kerning[k] = max(-32767, min(32767, v))
         font.save(self.ufo_path, overwrite=True)
         if recompile:
             self.compile_static()
         return {"shifted": len(font.kerning), "kerning": len(font.kerning)}
+
+    @_locked
+    def clear_all_kerning(self, recompile=False):
+        """Nolkan SEMUA nilai kerning (font.kerning dikosongkan). Grup kelas (font.groups)
+        SENGAJA dipertahankan → bisa langsung diatur massal lewat scope 'Kelas'. Konsisten dgn
+        perilaku import (zero_kern). Untuk project yang sudah ada."""
+        font = self._font()
+        n = len(font.kerning)
+        if n:
+            font.kerning.clear()
+            font.save(self.ufo_path, overwrite=True)
+            if recompile:
+                self.compile_static()
+        return {"cleared": n}
 
     @_locked
     def auto_kern_all(self, only_empty=True, recompile=True):
@@ -874,8 +890,11 @@ class Project:
                     skipped += 1
                     continue
             elif key != (L, R):
-                # mode TIMPA: buang exception per-glyph lama agar nilai kelas baru benar-benar terlihat
-                font.kerning.pop((L, R), None)
+                # mode TIMPA: buang SEMUA exception yang lebih spesifik dari kunci kelas (per-glyph &
+                # half-class) — kalau tidak, mereka membayangi nilai kelas baru (§9.6) → kern tak berubah.
+                for ex in [(L, R), (lg, R) if lg else None, (L, rg) if rg else None]:
+                    if ex and ex != key:
+                        font.kerning.pop(ex, None)
             font.kerning[key] = v
             written += 1
         if written:

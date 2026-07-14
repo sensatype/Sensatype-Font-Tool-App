@@ -155,6 +155,10 @@ export const api = {
       body: JSON.stringify({ delta, recompile: false }),
     }).then(j<{ shifted: number; kerning: number }>),
 
+  // Nolkan SEMUA nilai kerning (grup kelas dipertahankan) — untuk project yang sudah ada.
+  clearAllKern: () => fetch(`${BASE}/kerning/clear-all`, { method: "POST" })
+    .then(j<{ cleared: number }>),
+
   // Auto-kern optikal SELURUH pasangan huruf & angka. onlyEmpty → tak menimpa yang sudah ada.
   autoKernAll: (onlyEmpty = true) =>
     fetch(`${BASE}/kerning/auto`, {
