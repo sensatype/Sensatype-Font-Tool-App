@@ -179,11 +179,10 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
   if (step === "clean") {
     return (
       <div className="h-full flex flex-col">
+        {/* Alt & Liga TIDAK lagi di sini: diisi di langkah 3 ("Petakan") yang punya tombol
+            "Terapkan" + grid token-nya terlihat, jadi hasilnya langsung kelihatan. */}
         <WizardBar step={2}
-          left={<>
-            <AltLigMenu alt={altStr} setAlt={setAltStr} lig={ligStr} setLig={setLigStr} />
-            <button className="btn" onClick={() => setStep("upload")}><ArrowLeft className="size-4" />Ulang</button>
-          </>}
+          left={<button className="btn" onClick={() => setStep("upload")}><ArrowLeft className="size-4" />Ulang</button>}
           right={<button className="btn btn-accent" onClick={() => { autoFill(); setStep("map"); }}>Lanjut: petakan <ArrowRight className="size-4" /></button>}
           title="Bersihkan" sub={`${kept.length} glyph akan diimpor · ${staging?.shapes.length ?? 0} objek terdeteksi`} />
         <div className="px-4 py-2 border-b flex items-center gap-2 flex-wrap" style={{ borderColor: "var(--border)", background: "var(--bg-2)" }}>
@@ -289,11 +288,11 @@ function CommitOverlay({ pct, phase, count }: { pct: number; phase: string; coun
   );
 }
 
-// Menu input Alternate & Ligature. Nilai dipakai autoFill utk mengisi slot tengah urutan.
-// onApply (dipasang di langkah 3 "Petakan") → tombol konfirmasi yang LANGSUNG mengisi token,
-// jadi tak perlu balik ke langkah sebelumnya (atau menebak-nebak harus klik "Otomatis") dulu.
+// Menu input Alternate & Ligature — HANYA di langkah 3 ("Petakan"), tempat grid token terlihat.
+// onApply (= autoFill) → tombol "Terapkan" yang LANGSUNG mengisi token, jadi tak perlu balik ke
+// langkah sebelumnya (atau menebak harus klik "Otomatis") dulu. Wajib: satu-satunya cara pakai.
 function AltLigMenu({ alt, setAlt, lig, setLig, onApply }: {
-  alt: string; setAlt: (s: string) => void; lig: string; setLig: (s: string) => void; onApply?: () => void;
+  alt: string; setAlt: (s: string) => void; lig: string; setLig: (s: string) => void; onApply: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const filled = alt.trim() || lig.trim();
@@ -321,16 +320,12 @@ function AltLigMenu({ alt, setAlt, lig, setLig, onApply }: {
             <p className="text-faint text-[11px] leading-relaxed">
               Disisipkan otomatis di urutan: <b>setelah simbol, sebelum multilingual</b>. Nama dibentuk:
               alternate → <code>Y.ss01</code> (huruf berulang naik .ss02…), ligature → <code>R_U</code>, <code>f_f_i</code>.
-              {onApply
-                ? <> Klik <b>Terapkan</b> di bawah untuk langsung mengisi.</>
-                : <> Klik <b>Lanjut: petakan</b> untuk menerapkan.</>}
+              {" "}Klik <b>Terapkan</b> di bawah untuk langsung mengisi.
             </p>
-            {onApply && (
-              <button className="btn btn-accent w-full justify-center" onClick={() => { onApply(); setOpen(false); }}
-                title="Isi ulang token dari urutan otomatis + Alternate & Ligature di atas (menimpa isian token saat ini)">
-                <Check className="size-4" /> Terapkan
-              </button>
-            )}
+            <button className="btn btn-accent w-full justify-center" onClick={() => { onApply(); setOpen(false); }}
+              title="Isi ulang token dari urutan otomatis + Alternate & Ligature di atas (menimpa isian token saat ini)">
+              <Check className="size-4" /> Terapkan
+            </button>
           </div>
         </>
       )}
