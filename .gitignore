@@ -31,3 +31,6 @@ svg/
 content/
 content.zip
 content.json
+
+# token login (jangan pernah di-commit / dibundel)
+auth-token.json

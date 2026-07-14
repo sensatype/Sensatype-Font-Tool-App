@@ -16,8 +16,9 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 cp -R server "$OUT/server"
 cp -R engine "$OUT/engine"
 cp -R app/dist "$OUT/dist"
-# PENTING: server/ berisi DATA FONT ASLI (projects/workspace/log) — JANGAN ikut dibundel/publik.
+# PENTING: server/ berisi DATA FONT ASLI (projects/workspace/log) + token login — JANGAN dibundel/publik.
 rm -rf "$OUT/server/projects" "$OUT/server/workspace"
+find "$OUT" -name 'auth-token.json' -delete 2>/dev/null || true
 find "$OUT" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "$OUT" \( -name '*.pyc' -o -name '*.log' \) -delete 2>/dev/null || true
 

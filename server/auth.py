@@ -5,12 +5,13 @@ Model: backend Sensatype yang MENEGAKKAN login (password + OTP email + PIN). Fon
 TIDAK menyentuh DB Sensatype dan tak menyimpan secret apa pun — ia hanya:
   1. memulai login PKCE (S256) + `state` (anti-CSRF) di browser sistem,
   2. menukar `code` -> token via POST /app-auth/token,
-  3. menyimpan token HANYA di OS keyring (tak pernah di file/log/URL),
+  3. menyimpan token di FILE terlindung (perm 0600) di folder data aplikasi — bukan Keychain
+     OS (lihat _token_path); tak pernah di log/URL/browser,
   4. mengintrospeksi access token via POST /app-auth/verify (BUKAN verifikasi JWT lokal),
      sehingga logout / penonaktifan akun berlaku ~real-time.
 
-Sengaja BACKEND-CENTRIC: token tinggal di keyring sisi Python, tak pernah dikirim ke
-browser. Middleware menggerbangi endpoint lokal dgn mengintrospeksi token tersimpan.
+Sengaja BACKEND-CENTRIC: token tinggal di sisi Python, tak pernah dikirim ke browser.
+Middleware menggerbangi endpoint lokal dgn mengintrospeksi token tersimpan.
 Saat pindah ke Electron, hanya cara membuka browser + menangkap redirect (loopback
 sensatype://) yang berubah; modul ini tetap.
 """
@@ -23,10 +24,10 @@ import os
 import secrets
 import threading
 import time
+from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
-import keyring
 from fastapi import Depends, HTTPException, Request
 
 # ── Konfigurasi (via ENV; jangan hardcode rahasia) ─────────────────────────────
@@ -57,8 +58,13 @@ def _access_allowed(role, verify_res):
         return True                            # field absen & belum ada allowlist → semua boleh
     return role in ACCESS_ROLES
 
-_KR_SERVICE = "SensatypeFontTool"
-_KR_USER = "app-auth"
+# Token disimpan di FILE terlindung (perm 0600) di folder data aplikasi — BUKAN Keychain OS.
+# Alasan: aplikasi ad-hoc signed → tiap update installer, Keychain minta izin ulang (UX buruk).
+# File hanya-pemilik + token bearer berumur pendek & bisa dicabut server = trade-off wajar utk tool internal.
+def _token_path() -> Path:
+    pd = os.environ.get("SENSATYPE_PROJECTS_DIR")
+    base = Path(pd).parent if pd else Path(__file__).resolve().parent  # packaged: userData · dev: server/
+    return base / "auth-token.json"
 
 _lock = threading.Lock()               # lindungi baca/tulis token + _pending (CEPAT, tak boleh tahan I/O jaringan)
 _refresh_lock = threading.Lock()       # single-flight refresh: satu thread refresh, lain menunggu (bukan _lock)
@@ -88,19 +94,29 @@ def _new_pkce() -> tuple[str, str]:
 
 # ── Penyimpanan token (OS keyring) ─────────────────────────────────────────────
 def _save_tokens(d: dict) -> None:
-    keyring.set_password(_KR_SERVICE, _KR_USER, json.dumps(d))
+    p = _token_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d), encoding="utf-8")
+    try:
+        os.chmod(tmp, 0o600)  # hanya pemilik (POSIX). Windows abaikan — dilindungi ACL profil user.
+    except OSError:
+        pass
+    os.replace(tmp, p)  # tulis atomik
     _verify_cache.clear()
 
 
 def _load_tokens() -> dict | None:
-    raw = keyring.get_password(_KR_SERVICE, _KR_USER)
-    return json.loads(raw) if raw else None
+    try:
+        return json.loads(_token_path().read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return None
 
 
 def _clear_tokens() -> None:
     try:
-        keyring.delete_password(_KR_SERVICE, _KR_USER)
-    except keyring.errors.PasswordDeleteError:
+        _token_path().unlink()
+    except FileNotFoundError:
         pass
     _verify_cache.clear()
 
