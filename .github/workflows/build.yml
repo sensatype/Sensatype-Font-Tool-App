@@ -62,3 +62,19 @@ jobs:
           npm run build
           bash ../scripts/build-content.sh
           npx electron-builder ${{ matrix.ebflag }} --publish always
+
+  # electron-builder mengunggah artefak ke DRAFT release. Tanpa langkah ini, draft TAK PERNAH
+  # terbit → GitHub /releases/latest tetap menunjuk versi lama → install-script & updater
+  # dalam-app TAK melihat versi baru (sebab utama pengguna "nyangkut"). Job ini menerbitkan
+  # draft (buang draft + tandai Latest) SETELAH kedua installer (mac+win) selesai diunggah.
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Terbitkan release (buang draft + jadikan Latest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --draft=false --latest
