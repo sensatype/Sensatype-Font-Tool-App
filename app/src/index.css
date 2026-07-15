@@ -54,6 +54,18 @@ body {
 
 input, select, button, textarea { font: inherit; color: inherit; }
 
+/* Teks UI (menu, label, tombol, angka) TAK bisa diseleksi/disalin — seperti aplikasi native.
+   Bonus: seret di kanvas (node/garis/marquee) tak lagi tak sengaja menyorot teks.
+   Kolom entri teks & elemen ber-.selectable dikembalikan agar tetap bisa diketik/disalin. */
+#root {
+  -webkit-user-select: none;
+  user-select: none;
+}
+input, textarea, [contenteditable="true"], .selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* number input tanpa spinner */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
