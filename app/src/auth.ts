@@ -48,10 +48,12 @@ export function focusApp(): void {
   window.sensatype?.focus?.();
 }
 
-// Peta role → kapabilitas UI. Samakan dgn ADMIN_ROLES di server/auth.py.
-export const ADMIN_ROLES = ["admin", "atasan"];
+// Kebijakan (user 2026-07-15): hak akses Font Tool (access_font_tool) = AKSES PENUH — tak ada lagi
+// pembatasan per-role di aplikasi. AuthGate sudah menolak akun tanpa access_font_tool (layar
+// "Akses ditolak"), jadi SIAPA PUN yang sampai ke UI berhak atas semua fitur. Backend
+// (require_access) tetap menggerbangi tiap aksi berdasarkan access_font_tool.
 export const can = {
-  // Export terbuka utk semua role kerja (admin/atasan/senior/member) — hanya viewer_eksekutif
-  // (lihat-saja) yang tidak. Dulu admin/atasan saja → di Mac rekan tim tombolnya "hilang".
-  export: (role?: string | null) => !!role && role !== "viewer_eksekutif",
+  export: () => true,
+  delete: () => true,
+  rename: () => true,
 };

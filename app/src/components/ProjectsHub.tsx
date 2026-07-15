@@ -38,7 +38,7 @@ function Modal({ onClose, children }: { onClose: () => void; children: React.Rea
 export function ProjectsHub({ onOpen, onCreate, canDelete }: {
   onOpen: (id: string) => void;
   onCreate: () => void;
-  canDelete: boolean; // admin/atasan → boleh hapus & ganti nama
+  canDelete: boolean; // punya access_font_tool → boleh hapus & ganti nama (kini semua akun yg bisa masuk)
 }) {
   const [items, setItems] = useState<ProjectSummary[] | null>(null);
   const [err, setErr] = useState<string | null>(null);

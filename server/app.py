@@ -177,7 +177,7 @@ async def projects_open(pid: str):
 
 
 @app.delete("/api/projects/{pid}")
-async def projects_delete(pid: str, _: dict = Depends(auth.require_role("admin", "atasan"))):
+async def projects_delete(pid: str, _: dict = Depends(auth.require_access)):
     try:
         return {"projects": await run_in_threadpool(library.delete, pid), "active": library._active}
     except ValueError as e:
@@ -189,7 +189,7 @@ class RenameProject(BaseModel):
 
 
 @app.patch("/api/projects/{pid}")
-async def projects_rename(pid: str, body: RenameProject, _: dict = Depends(auth.require_role("admin", "atasan"))):
+async def projects_rename(pid: str, body: RenameProject, _: dict = Depends(auth.require_access)):
     try:
         return {"projects": await run_in_threadpool(library.rename, pid, body.family), "active": library._active}
     except KeyError:
@@ -504,7 +504,7 @@ def preview_recompile():
 
 
 @app.post("/api/maintenance/fix-unicodes")
-def fix_unicodes(_: dict = Depends(auth.require_role("admin", "atasan"))):
+def fix_unicodes(_: dict = Depends(auth.require_access)):
     """Perbaiki glyph karakter-tunggal tanpa unicode (data lama dari bug penamaan '_')."""
     return project.fix_missing_unicodes()
 
@@ -580,7 +580,7 @@ def preview():
 
 
 @app.get("/api/export")
-def export(_: dict = Depends(auth.require_role("admin", "atasan", "senior", "member"))):
+def export(_: dict = Depends(auth.require_access)):
     if not project.exists:
         raise HTTPException(404, "Tidak ada project")
     buf, name = project.export_zip()

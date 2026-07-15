@@ -178,6 +178,24 @@ async function waitFor(url, timeoutMs) {
   return false;
 }
 
+// Bunuh backend "nyasar" dari sesi sebelumnya yang crash (before-quit tak sempat jalan). WAJIB
+// dipanggil SEBELUM resolveContentDir, terutama di WINDOWS: proses Python yang masih hidup MENGUNCI
+// file di userData/content → rename/hapus saat swap staging GAGAL (Windows mengunci file terbuka;
+// macOS tidak). Juga mencegah ensureBackend memakai-ulang orphan yang menyajikan ISI LAMA (update
+// "tak muncul"). Aman: single-instance-lock menjamin kita satu-satunya instance app di titik ini,
+// jadi proses sensatype-backend apa pun pasti yatim. Hanya mode terpasang (jangan bunuh uvicorn dev).
+function killStrayBackends() {
+  if (!app.isPackaged) return;
+  try {
+    const cp = require("node:child_process");
+    if (process.platform === "win32") {
+      cp.execFileSync("taskkill", ["/F", "/T", "/IM", "sensatype-backend.exe"], { stdio: "ignore", timeout: 5000 });
+    } else {
+      cp.execFileSync("pkill", ["-9", "-f", "sensatype-backend"], { stdio: "ignore", timeout: 5000 });
+    }
+  } catch { /* tak ada yang jalan / perintah absen — abaikan */ }
+}
+
 async function ensureBackend() {
   // Bila backend sudah jalan (mis. uvicorn dev), pakai itu — jangan bentrok port.
   if (await ping(`${BACKEND_ORIGIN}/api/health`)) return true;
@@ -363,9 +381,10 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(() => {
     buildMenu();
-    // Terapkan isi ter-stage & tetapkan versi isi TANPA syarat di sini — ensureBackend bisa
-    // early-return (backend lama masih hidup) & tak pernah memanggil resolveContentDir → dulu
-    // update-isi ter-stage tak pernah aktif + effectiveContentVer mentok 0 (loop unduh).
+    // Bunuh backend yatim DULU (lepas kunci file di Windows + cegah pakai-ulang isi lama), baru
+    // resolveContentDir menerapkan staging & menetapkan versi isi TANPA syarat (ensureBackend bisa
+    // early-return, jadi resolve tak boleh bergantung padanya; dulu → staging tak pernah aktif).
+    killStrayBackends();
     if (app.isPackaged) resolveContentDir();
     // versi isi berubah sejak muat terakhir? → tandai agar cache renderer dibuang saat memuat UI.
     if (app.isPackaged && effectiveContentVer !== readLoadedVer()) contentChanged = true;
@@ -381,4 +400,10 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("before-quit", () => { if (backendProc) backendProc.kill(); });
+app.on("before-quit", () => {
+  try { if (backendProc) backendProc.kill(); } catch { /* sudah mati */ }
+  // Pastikan backend BENAR-BENAR mati sebelum quit selesai. Penting di WINDOWS: updater NSIS
+  // (electron-updater quitAndInstall) tak bisa mengganti sensatype-backend.exe yang masih terkunci
+  // proses hidup → pemasangan gagal/tertunda. Sinkron (execFileSync) → tuntas sebelum installer jalan.
+  killStrayBackends();
+});

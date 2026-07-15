@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Download, RefreshCw, FolderOpen, Loader2, Eraser } from "lucide-react";
 import { api } from "../api";
 import { can } from "../auth";
-import { useAuth } from "./AuthGate";
 import { AccountChip } from "./AccountChip";
 import type { ProjectState } from "../types";
 
@@ -31,7 +30,6 @@ export function TopBar({
   onHome: () => void;
   onClearKern: () => Promise<void> | void;
 }) {
-  const { role } = useAuth();
   const [exporting, setExporting] = useState(false);
   const [clearing, setClearing] = useState(false);
 
@@ -122,9 +120,9 @@ export function TopBar({
         <button className="btn" onClick={onHome} title="Kembali ke daftar project">
           <FolderOpen className="size-4" /> Projects
         </button>
-        {/* Export hanya untuk admin/atasan (gerbang role — backend juga menolak 403).
+        {/* Export terbuka utk semua akun ber-access_font_tool (backend: require_access).
             Klik → dialog "Simpan sebagai" (Finder/File Explorer) untuk memilih lokasi. */}
-        {can.export(role) && (
+        {can.export() && (
           <button className="btn btn-accent" onClick={handleExport} disabled={exporting}
             title="Export font — pilih lokasi penyimpanan">
             {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export

@@ -305,12 +305,12 @@ def require_auth(request: Request) -> dict:
     return sess
 
 
-def require_role(*roles: str):
-    allowed = set(roles) or ADMIN_ROLES
-
-    def dep(sess: dict = Depends(require_auth)) -> dict:
-        if sess.get("role") not in allowed:
-            raise HTTPException(403, "Role tidak diizinkan untuk aksi ini")
-        return sess
-
-    return dep
+# Kebijakan (dikonfirmasi user 2026-07-15): hak akses Font Tool (`access_font_tool`) = AKSES PENUH.
+# Tidak ada lagi pembatasan per-role di dalam aplikasi — begitu sebuah akun punya access_font_tool,
+# SEMUA aksi terbuka (export, hapus/rename project, fix-unicodes, dll). `_require_login` (middleware
+# app.py) sudah menolak akun tanpa access_font_tool; require_access menggerbangi ulang di tiap aksi
+# sensitif sebagai lapis kedua (defense-in-depth) — tetap benar walau middleware berubah.
+def require_access(sess: dict = Depends(require_auth)) -> dict:
+    if not sess.get("allowed"):
+        raise HTTPException(403, "Akun Anda tidak punya hak akses Font Tool (access_font_tool).")
+    return sess

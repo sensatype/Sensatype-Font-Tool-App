@@ -9,11 +9,9 @@ import { GlyphEditor } from "./components/GlyphEditor";
 import { PreviewBar } from "./components/PreviewBar";
 import { SidePanels } from "./components/SidePanels";
 import { ProjectsHub } from "./components/ProjectsHub";
-import { useAuth } from "./components/AuthGate";
-import { ADMIN_ROLES } from "./auth";
+import { can } from "./auth";
 
 export function App() {
-  const { role } = useAuth();
   const [view, setView] = useState<"hub" | "editor">("hub"); // beranda koleksi project → editor
   const [project, setProject] = useState<ProjectState | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -118,7 +116,7 @@ export function App() {
 
   if (view === "hub")
     return <ProjectsHub onOpen={openProject} onCreate={createProject}
-                        canDelete={!!role && ADMIN_ROLES.includes(role)} />;
+                        canDelete={can.delete()} />;
   if (!project) return <div className="h-full grid place-items-center text-muted">Memuat…</div>;
   if (project.empty) return <ImportWizard onImported={(st) => applyState(st, false)} onHome={() => setView("hub")} />;
 
