@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { FolderOpen, Plus, Trash2, Loader2, Type } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { FolderOpen, Plus, Trash2, Loader2, Type, Pencil } from "lucide-react";
 import { api, type ProjectSummary } from "../api";
 import { AccountChip } from "./AccountChip";
 
@@ -12,26 +12,66 @@ function rel(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
+// Modal ringan TANPA scrim/peredup — backdrop transparan (area di luar TIDAK berubah warna, hanya
+// menangkap klik utk menutup). Pemisahan visual dari kartu: bayangan + border, bukan menggelapkan
+// latar. Esc = tutup. Konten di-stop-propagate agar klik di dalam tak ikut menutup.
+function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "transparent" }}
+         onClick={onClose}>
+      <div className="w-full max-w-sm rounded-xl p-5"
+           style={{ background: "var(--panel)", border: "1px solid var(--border)",
+                    boxShadow: "0 12px 40px rgba(0,0,0,0.45)" }}
+           onClick={(e) => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // Beranda setelah login: koleksi project yang telah dikerjakan (fitur #1). Klik kartu → buka editor.
 export function ProjectsHub({ onOpen, onCreate, canDelete }: {
   onOpen: (id: string) => void;
   onCreate: () => void;
-  canDelete: boolean;
+  canDelete: boolean; // admin/atasan → boleh hapus & ganti nama
 }) {
   const [items, setItems] = useState<ProjectSummary[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState<ProjectSummary | null>(null);
+  const [renaming, setRenaming] = useState<ProjectSummary | null>(null);
+  const [renameVal, setRenameVal] = useState("");
+  const renameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.projects().then((r) => setItems(r.projects)).catch((e) => setErr(String(e?.message || e)));
   }, []);
 
-  const del = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm(`Hapus project "${id}"? Tindakan ini permanen.`)) return;
-    setBusyId(id);
+  useEffect(() => { if (renaming) { setRenameVal(renaming.family); setTimeout(() => renameRef.current?.select(), 0); } }, [renaming]);
+
+  const doDelete = async () => {
+    const p = confirmDel; if (!p) return;
+    setConfirmDel(null); setBusyId(p.id); setErr(null);
     try {
-      setItems((await api.deleteProject(id)).projects);
+      setItems((await api.deleteProject(p.id)).projects);
+    } catch (e) {
+      setErr(String((e as Error).message || e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const doRename = async () => {
+    const p = renaming; const name = renameVal.trim();
+    if (!p || !name || name === p.family) { setRenaming(null); return; }
+    setRenaming(null); setBusyId(p.id); setErr(null);
+    try {
+      setItems((await api.renameProject(p.id, name)).projects);
     } catch (e) {
       setErr(String((e as Error).message || e));
     } finally {
@@ -86,14 +126,24 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
                     </div>
                   </div>
                   {canDelete && (
-                    <button
-                      title="Hapus project"
-                      onClick={(e) => del(p.id, e)}
-                      disabled={busyId === p.id}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-faint hover:text-red-500 p-1 -m-1"
-                    >
-                      {busyId === p.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-                    </button>
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        title="Ganti nama project"
+                        onClick={(e) => { e.stopPropagation(); setRenaming(p); }}
+                        disabled={busyId === p.id}
+                        className="text-faint hover:text-[var(--accent)] p-1"
+                      >
+                        <Pencil className="size-4" />
+                      </button>
+                      <button
+                        title="Hapus project"
+                        onClick={(e) => { e.stopPropagation(); setConfirmDel(p); }}
+                        disabled={busyId === p.id}
+                        className="text-faint hover:text-red-500 p-1"
+                      >
+                        {busyId === p.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                      </button>
+                    </div>
                   )}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-faint mt-3">
@@ -106,6 +156,44 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
           </div>
         )}
       </div>
+
+      {/* Konfirmasi hapus — modal dalam-app (tanpa peredup latar). */}
+      {confirmDel && (
+        <Modal onClose={() => setConfirmDel(null)}>
+          <div className="font-semibold mb-1">Hapus project?</div>
+          <p className="text-muted text-sm mb-4">
+            <span className="text-[var(--glyph)] font-medium">{confirmDel.family}</span> akan dihapus permanen.
+            Tindakan ini tidak bisa dibatalkan.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button className="btn" onClick={() => setConfirmDel(null)}>Batal</button>
+            <button className="btn" style={{ background: "#dc2626", color: "#fff", borderColor: "#dc2626" }}
+                    onClick={doDelete}>
+              <Trash2 className="size-4" /> Hapus
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Ganti nama project. */}
+      {renaming && (
+        <Modal onClose={() => setRenaming(null)}>
+          <div className="font-semibold mb-3">Ganti nama project</div>
+          <input
+            ref={renameRef}
+            className="field w-full !py-2 mb-4"
+            value={renameVal}
+            onChange={(e) => setRenameVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") doRename(); }}
+            placeholder="Nama project"
+            maxLength={80}
+          />
+          <div className="flex justify-end gap-2">
+            <button className="btn" onClick={() => setRenaming(null)}>Batal</button>
+            <button className="btn btn-accent" disabled={!renameVal.trim()} onClick={doRename}>Simpan</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

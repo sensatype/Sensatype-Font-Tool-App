@@ -184,6 +184,20 @@ async def projects_delete(pid: str, _: dict = Depends(auth.require_role("admin",
         raise HTTPException(400, str(e))
 
 
+class RenameProject(BaseModel):
+    family: str
+
+
+@app.patch("/api/projects/{pid}")
+async def projects_rename(pid: str, body: RenameProject, _: dict = Depends(auth.require_role("admin", "atasan"))):
+    try:
+        return {"projects": await run_in_threadpool(library.rename, pid, body.family), "active": library._active}
+    except KeyError:
+        raise HTTPException(404, "Project tidak ada")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "hasProject": project.exists}

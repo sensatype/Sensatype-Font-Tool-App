@@ -1413,6 +1413,28 @@ class ProjectLibrary:
             (self.root / ".active").write_text(pid)
             return pid
 
+    def rename(self, pid, family):
+        """Ganti nama tampilan (family) project di project.json. TIDAK mengubah folder id (identitas
+        internal: .active, path, rebind) → aman. Tulis atomik (temp → replace) agar mati di tengah tak
+        merusak meta. Bila project ini AKTIF, _meta() membacanya segar sehingga langsung tercermin."""
+        fam = str(family or "").strip()
+        if not fam:
+            raise ValueError("Nama project tidak boleh kosong")
+        with self._op_lock:
+            d = self._safe(pid)
+            mp = d / "project.json"
+            if not d.exists() or not mp.exists():
+                raise KeyError(pid)
+            try:
+                meta = json.loads(mp.read_text())
+            except (ValueError, OSError):
+                meta = {}
+            meta["family"] = fam[:80]
+            tmp = d / "project.json.tmp"
+            tmp.write_text(json.dumps(meta, indent=2))
+            os.replace(tmp, mp)
+            return self.list()
+
     def delete(self, pid):
         with self._op_lock:
             d = self._safe(pid)

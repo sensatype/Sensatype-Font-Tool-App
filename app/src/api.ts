@@ -37,6 +37,10 @@ export const api = {
   deleteProject: (id: string) =>
     fetch(`${BASE}/projects/${encodeURIComponent(id)}`, { method: "DELETE" })
       .then(j<{ projects: ProjectSummary[]; active: string | null }>),
+  renameProject: (id: string, family: string) =>
+    fetch(`${BASE}/projects/${encodeURIComponent(id)}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ family }),
+    }).then(j<{ projects: ProjectSummary[]; active: string | null }>),
 
   layouts: () => fetch(`${BASE}/layouts`).then(j<{ layouts: string[] }>),
 
