@@ -3,13 +3,15 @@ import { Upload, Loader2, Trash2, Combine, Scissors, Eye, ArrowRight, ArrowLeft,
 import { api } from "../api";
 import { SpecimenCanvas } from "./SpecimenCanvas";
 import { AccountChip } from "./AccountChip";
-import { commandFor, comboFromEvent } from "../keymap";
+import { commandFor, comboFromEvent, bindingOf, formatCombo, useKeymapVersion } from "../keymap";
 import logo from "../assets/logo.svg";
 import type { ProjectState, StagedShape, StagingState } from "../types";
 
 type Step = "upload" | "clean" | "map";
 
 export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectState) => void; onHome?: () => void }) {
+  useKeymapVersion(); // tooltip pintasan ikut ter-update bila binding diubah di Pengaturan
+  const kc = (id: string) => formatCombo(bindingOf(id)); // hint kombinasi utk tooltip tombol
   const [step, setStep] = useState<Step>("upload");
   const [staging, setStaging] = useState<StagingState | null>(null);
   const [sel, setSel] = useState<Set<number>>(new Set());
@@ -64,14 +66,31 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
   async function undo() { setSel(new Set()); try { setStaging(await api.stagingUndo()); } catch (e) { showErr(e); } }
   async function redo() { setSel(new Set()); try { setStaging(await api.stagingRedo()); } catch (e) { showErr(e); } }
   useEffect(() => {
-    if (step !== "clean") return;
     function onKey(e: KeyboardEvent) {
-      // sedang mengetik (mis. kolom Alt & Liga) → jangan bajak ⌘Z teks jadi undo staging
+      // sedang mengetik (mis. kolom token/Alt&Liga) → jangan bajak (⌘Z ≠ undo, Enter ≠ commit)
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      const cmd = commandFor(comboFromEvent(e), "global"); // Urungkan/Ulangi via keymap terpusat
-      if (cmd?.id === "undo") { e.preventDefault(); undo(); }
-      else if (cmd?.id === "redo") { e.preventDefault(); redo(); }
+      const combo = comboFromEvent(e);
+      if (step === "clean") {
+        // Semua pintasan langkah 2 (Bersihkan) via keymap konteks "clean" — bisa diubah di Pengaturan.
+        const cmd = commandFor(combo, "clean");
+        if (!cmd) return;
+        e.preventDefault();
+        switch (cmd.id) {
+          case "undo": undo(); return;
+          case "redo": redo(); return;
+          case "selectAll": setSel(new Set((staging?.shapes ?? []).map((s) => s.id))); return;
+          case "delete":      if (sel.size) op("exclude", [...sel]); return;    // Buang objek terpilih
+          case "importMerge": if (sel.size >= 2) op("merge", [...sel]); return; // Gabung
+          case "importSplit": if (sel.size) op("split", [...sel]); return;      // Pisah
+          default: return;
+        }
+      }
+      if (step === "map") {
+        // Langkah 3 (Petakan): ⌘/Ctrl+Enter = Impor (commit).
+        const cmd = commandFor(combo, "map");
+        if (cmd?.id === "importCommit" && !busy) { e.preventDefault(); commit(); }
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -186,10 +205,10 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
           title="Bersihkan" sub={`${kept.length} glyph akan diimpor · ${staging?.shapes.length ?? 0} objek terdeteksi`} />
         <div className="px-4 py-2 border-b flex items-center gap-2 flex-wrap" style={{ borderColor: "var(--border)", background: "var(--bg-2)" }}>
           <span className="text-xs text-muted mr-1">{sel.size} dipilih</span>
-          <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("exclude", [...sel])}><Trash2 className="size-4" />Buang</button>
-          <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("include", [...sel])}><Eye className="size-4" />Pulihkan</button>
-          <button className="btn !py-1.5" disabled={sel.size < 2} onClick={() => op("merge", [...sel])}><Combine className="size-4" />Gabung</button>
-          <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("split", [...sel])}><Scissors className="size-4" />Pisah</button>
+          <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("exclude", [...sel])} title={`Buang objek terpilih (${kc("delete")})`}><Trash2 className="size-4" />Buang</button>
+          <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("include", [...sel])} title="Pulihkan objek yang dibuang"><Eye className="size-4" />Pulihkan</button>
+          <button className="btn !py-1.5" disabled={sel.size < 2} onClick={() => op("merge", [...sel])} title={`Gabungkan objek jadi satu (${kc("importMerge")})`}><Combine className="size-4" />Gabung</button>
+          <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("split", [...sel])} title={`Pisahkan objek gabungan (${kc("importSplit")})`}><Scissors className="size-4" />Pisah</button>
           <button className="btn !py-1.5" onClick={() => setSnapOn((v) => !v)}
             style={{ background: snapOn ? "var(--accent)" : "transparent", color: snapOn ? "#fff" : "var(--muted)" }}
             title={snapOn
@@ -201,9 +220,9 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
           <button className="btn !py-1.5" onClick={() => addGuide("baseline")}><span style={{ color: "#ff5b6e" }}>―</span> Baseline</button>
           <button className="btn !py-1.5" onClick={() => addGuide("cap")}><span style={{ color: "#5b9cff" }}>―</span> Cap</button>
           <div className="h-5 w-px mx-1" style={{ background: "var(--border-2)" }} />
-          <button className="btn !py-1.5" disabled={!staging?.canUndo} onClick={undo} title="Undo (⌘Z)"><Undo2 className="size-4" /></button>
-          <button className="btn !py-1.5" disabled={!staging?.canRedo} onClick={redo} title="Redo (⌘⇧Z)"><Redo2 className="size-4" /></button>
-          <span className="text-faint text-[11px] ml-auto"><b>Seret glyph</b>=pindah · <b>panah</b>=geser · seret kosong=pilih area · seret garis=semua se-tipe · ⌘Z undo</span>
+          <button className="btn !py-1.5" disabled={!staging?.canUndo} onClick={undo} title={`Urungkan (${kc("undo")})`}><Undo2 className="size-4" /></button>
+          <button className="btn !py-1.5" disabled={!staging?.canRedo} onClick={redo} title={`Ulangi (${kc("redo")})`}><Redo2 className="size-4" /></button>
+          <span className="text-faint text-[11px] ml-auto"><b>Pilih semua</b> {kc("selectAll")} · <b>Gabung</b> {kc("importMerge")} · <b>Pisah</b> {kc("importSplit")} · <b>Buang</b> {kc("delete")}</span>
         </div>
         {staging && (
           <SpecimenCanvas
@@ -225,7 +244,7 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
     <div className="h-full flex flex-col relative">
       <WizardBar step={3}
         left={<button className="btn" onClick={() => setStep("clean")}><ArrowLeft className="size-4" />Bersihkan</button>}
-        right={<button className="btn btn-accent" disabled={busy} onClick={commit}>{busy ? <Loader2 className="size-4 animate-spin" /> : null}Import {kept.length} glyph</button>}
+        right={<button className="btn btn-accent" disabled={busy} onClick={commit} title={`Impor & kompilasi font (${kc("importCommit")})`}>{busy ? <Loader2 className="size-4 animate-spin" /> : null}Import {kept.length} glyph</button>}
         title="Petakan glyph" sub="Token ke-i → glyph ke-i (urutan baca). Alt/liga tulis nama: Y.ss01, R_U, f_i" />
       <div className="px-4 py-2.5 border-b flex items-center gap-3 flex-wrap" style={{ borderColor: "var(--border)", background: "var(--bg-2)" }}>
         <button className="btn !py-1.5" onClick={autoFill}><Wand2 className="size-4" />Otomatis (A–Z a–z 0–9 …)</button>

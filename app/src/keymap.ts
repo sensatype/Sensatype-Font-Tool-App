@@ -4,7 +4,7 @@
 // (via commandFor/comboFromEvent), bukan mengecek tombol hardcode.
 import { useSyncExternalStore } from "react";
 
-export type CmdContext = "global" | "element" | "contour";
+export type CmdContext = "global" | "element" | "contour" | "clean" | "map"; // clean/map = impor langkah 2/3
 export interface Command {
   id: string;
   label: string;
@@ -16,13 +16,20 @@ export interface Command {
 // Daftar perintah yang bisa diubah. Panah (nudge) & modifier-saat-seret (Shift/Alt) SENGAJA tak
 // di sini — itu interaksi modal/konvensi, bukan "perintah" (Illustrator pun tak mengizinkannya diubah).
 export const COMMANDS: Command[] = [
-  { id: "undo",      label: "Urungkan",    category: "Umum",   contexts: ["global"],             def: "Mod+Z" },
-  { id: "redo",      label: "Ulangi",      category: "Umum",   contexts: ["global"],             def: "Mod+Shift+Z" },
-  { id: "selectAll", label: "Pilih semua", category: "Elemen", contexts: ["element"],            def: "Mod+A" },
-  { id: "duplicate", label: "Duplikat",    category: "Elemen", contexts: ["element"],            def: "Mod+D" },
-  { id: "group",     label: "Grup",        category: "Elemen", contexts: ["element"],            def: "Mod+G" },
-  { id: "ungroup",   label: "Lepas grup",  category: "Elemen", contexts: ["element"],            def: "Mod+Shift+G" },
-  { id: "delete",    label: "Hapus",       category: "Elemen · Kontur", contexts: ["element", "contour"], def: "Delete" },
+  { id: "undo",      label: "Urungkan",    category: "Umum",   contexts: ["global"],                       def: "Mod+Z" },
+  { id: "redo",      label: "Ulangi",      category: "Umum",   contexts: ["global"],                       def: "Mod+Shift+Z" },
+  // "Hapus/Buang" & "Pilih semua" berlaku lintas area (editor + impor langkah 2) — SATU command, satu
+  // binding, banyak konteks (bukan duplikat) → tak pernah bentrok dgn dirinya.
+  { id: "delete",    label: "Hapus / Buang", category: "Umum", contexts: ["element", "contour", "clean"], def: "Delete" },
+  { id: "selectAll", label: "Pilih semua", category: "Umum",   contexts: ["element", "clean"],             def: "Mod+A" },
+  { id: "duplicate", label: "Duplikat",    category: "Editor", contexts: ["element"],                      def: "Mod+D" },
+  { id: "group",     label: "Grup",        category: "Editor", contexts: ["element"],                      def: "Mod+G" },
+  { id: "ungroup",   label: "Lepas grup",  category: "Editor", contexts: ["element"],                      def: "Mod+Shift+G" },
+  // Impor langkah 2 (Bersihkan) & 3 (Petakan). "Gabung/Pisah" pakai ⌘G/⌘⇧G — mental model "gabung/pisah"
+  // yang SAMA dgn editor; aman karena berbeda konteks (deteksi bentrok sadar-konteks).
+  { id: "importMerge",  label: "Gabung objek", category: "Impor · Bersihkan", contexts: ["clean"], def: "Mod+G" },
+  { id: "importSplit",  label: "Pisah objek",  category: "Impor · Bersihkan", contexts: ["clean"], def: "Mod+Shift+G" },
+  { id: "importCommit", label: "Impor font",   category: "Impor · Petakan",   contexts: ["map"],   def: "Mod+Enter" },
 ];
 const BY_ID: Record<string, Command> = Object.fromEntries(COMMANDS.map((c) => [c.id, c]));
 
@@ -61,11 +68,19 @@ export function commandFor(combo: string, ctx?: CmdContext): Command | null {
   }
   return null;
 }
-// Perintah LAIN yang sudah memakai `combo` (deteksi bentrok), kecuali exceptId. null = bebas.
+// Perintah LAIN yang bentrok dengan `combo` (deteksi bentrok SADAR-KONTEKS), kecuali exceptId.
+// Dua perintah hanya BENTROK bila kombinasinya sama DAN konteksnya beririsan (atau salah satu
+// "global" → berlaku di semua konteks). → ⌘G boleh "Grup" (editor) & "Gabung objek" (impor)
+// sekaligus karena element ∩ clean = ∅. null = bebas.
+function ctxOverlap(a: CmdContext[], b: CmdContext[]): boolean {
+  return a.includes("global") || b.includes("global") || a.some((c) => b.includes(c));
+}
 export function conflictFor(combo: string, exceptId: string): Command | null {
+  const x = BY_ID[exceptId];
   for (const c of COMMANDS) {
     if (c.id === exceptId) continue;
-    if (bindingOf(c.id) === combo) return c;
+    if (bindingOf(c.id) !== combo) continue;
+    if (!x || ctxOverlap(x.contexts, c.contexts)) return c;
   }
   return null;
 }
