@@ -3,6 +3,7 @@ import { Upload, Loader2, Trash2, Combine, Scissors, Eye, ArrowRight, ArrowLeft,
 import { api } from "../api";
 import { SpecimenCanvas } from "./SpecimenCanvas";
 import { AccountChip } from "./AccountChip";
+import { commandFor, comboFromEvent } from "../keymap";
 import logo from "../assets/logo.svg";
 import type { ProjectState, StagedShape, StagingState } from "../types";
 
@@ -68,13 +69,9 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
       // sedang mengetik (mis. kolom Alt & Liga) → jangan bajak ⌘Z teks jadi undo staging
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        (e.shiftKey ? redo() : undo());
-      } else if (mod && e.key.toLowerCase() === "y") {
-        e.preventDefault(); redo();
-      }
+      const cmd = commandFor(comboFromEvent(e), "global"); // Urungkan/Ulangi via keymap terpusat
+      if (cmd?.id === "undo") { e.preventDefault(); undo(); }
+      else if (cmd?.id === "redo") { e.preventDefault(); redo(); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, Plus, Trash2, Loader2, Type, Pencil } from "lucide-react";
+import { FolderOpen, Plus, Trash2, Loader2, Type, Pencil, Settings } from "lucide-react";
 import { api, type ProjectSummary } from "../api";
 import { AccountChip } from "./AccountChip";
+import { useSettings } from "./Settings";
 import logo from "../assets/logo.svg";
 
 function rel(ts: number): string {
@@ -41,6 +42,7 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
   onCreate: () => void;
   canDelete: boolean; // punya access_font_tool → boleh hapus & ganti nama (kini semua akun yg bisa masuk)
 }) {
+  const settings = useSettings();
   const [items, setItems] = useState<ProjectSummary[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -93,6 +95,9 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
           <div className="ml-auto flex items-center gap-3">
             <button className="btn btn-accent" onClick={onCreate}>
               <Plus className="size-4" /> Project baru
+            </button>
+            <button className="btn !p-1.5" onClick={settings.open} title="Pengaturan (⌘/Ctrl+,)">
+              <Settings className="size-4" />
             </button>
             {/* Akun (profil + nama) bisa diakses di luar project juga → ganti akun dari mana saja. */}
             <div className="h-5 w-px" style={{ background: "var(--border-2)" }} />

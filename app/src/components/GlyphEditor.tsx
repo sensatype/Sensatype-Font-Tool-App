@@ -4,6 +4,7 @@ import { Move, Spline, Square, Circle, Trash2, ZoomIn, ZoomOut, Maximize, Undo2,
   FlipHorizontal2, FlipVertical2, RotateCcw, RotateCw, Anchor as AnchorIcon,
   Copy, Group, Ungroup, Combine, Loader2, Crosshair, Grid3x3, Moon, Sun, Check, X, Sparkles, Wand2 } from "lucide-react";
 import { api } from "../api";
+import { commandFor, comboFromEvent, type CmdContext } from "../keymap";
 import { contoursToPath, addNode, removeNode, segClosest } from "../outline";
 import type { Anchor, ContourPoint, Glyph, GlyphComponent, GlyphDetail, GlyphRender, KernInfo } from "../types";
 
@@ -560,35 +561,35 @@ export function GlyphEditor({
       // sedang mengetik di kolom input/textarea → JANGAN bajak (Backspace ≠ hapus node, ⌘Z ≠ undo glyph)
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
-      if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
-      if (mode === "element") {
-        if (mod && e.key.toLowerCase() === "a") { e.preventDefault();
-          setESel(new Set([...contours.map((_, i) => `c${i}`), ...comps.map((_, i) => `m${i}`)])); return; }
-        if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateElements(); return; }
-        if (mod && e.key.toLowerCase() === "g") { e.preventDefault(); e.shiftKey ? ungroupSel() : groupSel(); return; }
-        if (!eSel.size) return;
-        if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteElements(); return; }
-        const EN: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
-        if (EN[e.key]) { e.preventDefault(); const st = (snapOn && snapStep > 0 ? snapStep : 1) * (e.shiftKey ? 10 : 1); nudgeElements(EN[e.key][0] * st, EN[e.key][1] * st); }
-        return;
-      }
-      if (mode !== "contour") return;
-      if (e.key === "Delete" || e.key === "Backspace") {
-        if (cSel != null) { e.preventDefault(); deleteComp(cSel); return; }
-        if (aSel != null) { e.preventDefault(); deleteAnchor(aSel); return; }
-        if (sel.size) { e.preventDefault(); doRemove(); }
-        return;
-      }
-      if (!sel.size) return;
-      const NUD: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
-      if (NUD[e.key]) { // panah = geser node terpilih (Shift = 10×); y-up
+      // Pintasan PERINTAH via keymap terpusat (bisa diubah di Pengaturan). Konteks = mode aktif.
+      const ctx: CmdContext = mode === "element" ? "element" : mode === "contour" ? "contour" : "global";
+      const cmd = commandFor(comboFromEvent(e), ctx);
+      if (cmd) {
         e.preventDefault();
-        const step = (snapOn && snapStep > 0 ? snapStep : 1) * (e.shiftKey ? 10 : 1);
-        const [ux, uy] = NUD[e.key];
-        nudgeSel(ux * step, uy * step);
+        switch (cmd.id) {
+          case "undo": undo(); return;
+          case "redo": redo(); return;
+          case "selectAll": // hanya cocok di mode element (konteks command)
+            setESel(new Set([...contours.map((_, i) => `c${i}`), ...comps.map((_, i) => `m${i}`)])); return;
+          case "duplicate": duplicateElements(); return;
+          case "group": groupSel(); return;
+          case "ungroup": ungroupSel(); return;
+          case "delete":
+            if (mode === "element") { if (eSel.size) deleteElements(); return; }
+            if (cSel != null) { deleteComp(cSel); return; }
+            if (aSel != null) { deleteAnchor(aSel); return; }
+            if (sel.size) doRemove();
+            return;
+          default: return;
+        }
       }
+      // Panah = geser (nudge) node/elemen terpilih; Shift = 10×; y-up. TAK bisa diubah (interaksi modal).
+      const NUD: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+      if (!NUD[e.key]) return;
+      const st = (snapOn && snapStep > 0 ? snapStep : 1) * (e.shiftKey ? 10 : 1);
+      const [ux, uy] = NUD[e.key];
+      if (mode === "element") { if (eSel.size) { e.preventDefault(); nudgeElements(ux * st, uy * st); } return; }
+      if (mode === "contour" && sel.size) { e.preventDefault(); nudgeSel(ux * st, uy * st); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

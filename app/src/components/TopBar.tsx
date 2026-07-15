@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Download, RefreshCw, FolderOpen, Loader2, Eraser } from "lucide-react";
+import { Download, RefreshCw, FolderOpen, Loader2, Eraser, Settings } from "lucide-react";
 import { api } from "../api";
 import { can } from "../auth";
 import { AccountChip } from "./AccountChip";
+import { useSettings } from "./Settings";
 import logo from "../assets/logo.svg";
 import type { ProjectState } from "../types";
 
@@ -32,6 +33,7 @@ export function TopBar({
   onClearKern: () => Promise<void> | void;
 }) {
   const [exporting, setExporting] = useState(false);
+  const settings = useSettings();
   const [clearing, setClearing] = useState(false);
 
   async function handleExport() {
@@ -129,6 +131,9 @@ export function TopBar({
             {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export
           </button>
         )}
+        <button className="btn !p-1.5" onClick={settings.open} title="Pengaturan (⌘/Ctrl+,)">
+          <Settings className="size-4" />
+        </button>
         <div className="h-5 w-px" style={{ background: "var(--border-2)" }} />
         <AccountChip />
       </div>
