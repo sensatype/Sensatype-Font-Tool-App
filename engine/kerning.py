@@ -1,27 +1,43 @@
 """
-Seed kerning Tier-1 (class-level, distance/area-based) untuk UFO.
+Kerning optikal SADAR-BENTUK (class-level) untuk UFO — mesin "Smart Kerning".
 
 Sesuai PRD §5/§8 & CONTEXT D8/D9/§9.6/§9.7:
   - LEVEL KELAS: tulis ke groups.plist (public.kern1/public.kern2) + kerning.plist,
     BUKAN raw pair (raw pair = jurang n² yang bikin mangkrak).
-  - Tier-1 saja: seed otomatis "cukup baik", finishing manual. BUKAN Tier-2/optical/iKern.
 
-Metode (distance-based yang benar = RATA-RATA celah, bukan jarak titik terdekat):
-  Untuk pasangan (L,R), pada tiap ketinggian y di irisan rentang ink:
-      gap(y) = (advanceL - rightEdgeL(y)) + leftEdgeR(y)
-  avgGap = rata-rata gap(y).  kern = round(target - avgGap).
-  target = avgGap dari pasangan referensi flat (default 'n'|'n').
-  -> pasangan bulat (O|O) punya avgGap besar (celah lensa) -> kern negatif (rapatkan);
-     pasangan lurus (n|n) ~ target -> kern ~0.  Arah benar.
+Model optik v3 — "kenali kerangka tiap glyph, hasil seimbang" (tak terlalu rapat/renggang):
 
-Grouping: glyph dikelompokkan per BENTUK sisi:
-  - public.kern1.* (posisi KIRI/pertama)  dikelompokkan per profil sisi KANAN,
-  - public.kern2.* (posisi KANAN/kedua)  dikelompokkan per profil sisi KIRI.
-Satu nilai kern disimpan per pasangan kelas (eksemplar), dipakai bersama semua anggota.
+  1. SCANLINE. Untuk pasangan (L,R), pada tiap ketinggian y di irisan rentang ink diukur
+     margin kanan L (tinta terkanan) & margin kiri R (tinta terkiri).
+
+  2. CONE-FILL 45° (kunci kecerdasan). Margin diisi memakai kerucut 45° dari titik ekstrem:
+       - COUNTER TERTUTUP (mulut 'c', apertur 'e/G/S') → TERISI: kantong dalam ditutup dinding
+         atas+bawahnya → tak dihitung sbg celah → huruf berikut TAK ditusuk masuk ke mulut.
+       - FLANK TERBUKA ('T' di bawah palang, 'L' di atas kaki, 'V/A/Y' diagonal) → DIPERTAHANKAN:
+         terbuka sampai batas zona, tak ada dinding utk menutup → tetap dihitung → dirapatkan.
+     Inilah beda "terlalu dekat/jauh" vs "seimbang": model lama tak bisa membedakan mulut-counter
+     (jangan dirapatkan) dari flank-terbuka (rapatkan), sehingga c|o over-tusuk & T|a acak.
+
+  3. OPENNESS. Rata-rata terbobot-tengah dari celah TERISI (pusat zona berbobot penuh, tepi
+     meluruh) = seberapa "terbuka" pasangan secara perseptual.
+       kern = target − openness.
+     target = openness pasangan referensi LURUS (median I|I, H|H, l|l, N|N, …) — DIUKUR DENGAN
+     JALUR YANG SAMA → pasangan lurus (H|H) otomatis ~0 (tak "diperbaiki" sia-sia), dan skala
+     mengikuti spacing font itu sendiri (gelap/terang, rapat/lega).
+
+  4. LANTAI ANTI-TABRAKAN. Kern negatif tak boleh membuat celah NYATA (bukan terisi) minimum
+     turun di bawah safe_frac×target → runcing/serif tak bersentuhan, dan tak pernah dipaksa
+     merenggang. Deadband membuang koreksi <~0.8% em (noise), clamp membatasi ekstrem.
+
+Grouping (impor/seed): glyph dikelompokkan per BENTUK sisi (public.kern1/2.*), satu nilai kern
+per pasangan kelas (eksemplar) dipakai bersama anggotanya.
 
 Tidak ada dependensi baru: pakai mesin scanline di htls.py (fontTools saja).
 """
 from __future__ import annotations
+
+import math
+import statistics
 
 import htls  # _flatten, _margins_at, _bounds
 
@@ -33,25 +49,127 @@ def _profiles(glyph):
     return c, htls._bounds(c)
 
 
-def _avg_gap(Lc, Ladv, Rc, step):
-    """Rata-rata celah berhadapan antara sisi kanan L dan sisi kiri R."""
-    Lb = htls._bounds(Lc)
-    Rb = htls._bounds(Rc)
+# ── cone-fill 45° (tutup counter, pertahankan flank terbuka) ────────────────────
+# Dua-lintas (grassfire) O(n): tiap titik tak boleh "jatuh" dari tetangganya lebih curam dari
+# `slope` → lembah sempit (counter berdinding) terisi; ramp yg mencapai batas zona (flank) tetap.
+def _cone_close_right(ys, xs, slope):
+    """Margin KANAN L: naikkan x ke arah ekstrem (max) dgn kemiringan ≤ slope."""
+    n = len(xs)
+    out = list(xs)
+    for i in range(1, n):
+        d = (ys[i] - ys[i - 1]) * slope
+        if out[i] < out[i - 1] - d:
+            out[i] = out[i - 1] - d
+    for i in range(n - 2, -1, -1):
+        d = (ys[i + 1] - ys[i]) * slope
+        if out[i] < out[i + 1] - d:
+            out[i] = out[i + 1] - d
+    return out
+
+
+def _cone_close_left(ys, xs, slope):
+    """Margin KIRI R: turunkan x ke arah ekstrem (min) dgn kemiringan ≤ slope."""
+    n = len(xs)
+    out = list(xs)
+    for i in range(1, n):
+        d = (ys[i] - ys[i - 1]) * slope
+        if out[i] > out[i - 1] + d:
+            out[i] = out[i - 1] + d
+    for i in range(n - 2, -1, -1):
+        d = (ys[i + 1] - ys[i]) * slope
+        if out[i] > out[i + 1] + d:
+            out[i] = out[i + 1] + d
+    return out
+
+
+def _glyph_margins(contours, bounds, step, slope):
+    """Tabel margin satu glyph pada grid-y (kelipatan step): y → (rawR, filledR, rawL, filledL).
+    Cone-fill dihitung atas SELURUH tinggi glyph (ekstrem benar), lalu di-window per pasangan.
+    Return (tabel, bounds)."""
+    ys, R, L = [], [], []
+    y = math.ceil(bounds[1] / step) * step
+    while y <= bounds[3]:
+        mn, mx = htls._margins_at(contours, y)
+        if mn is not None:
+            ys.append(y); R.append(mx); L.append(mn)
+        y += step
+    if len(ys) < 2:
+        return {}, bounds
+    Rf = _cone_close_right(ys, R, slope)
+    Lf = _cone_close_left(ys, L, slope)
+    tab = {ys[i]: (R[i], Rf[i], L[i], Lf[i]) for i in range(len(ys))}
+    return tab, bounds
+
+
+def _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step):
+    """Dari tabel margin L & R: (openness_terisi_terbobot, celah_nyata_min) di zona overlap.
+    (None, None) bila tak beririsan. openness = seberapa terbuka (perseptual); celah_nyata_min
+    = titik jepit fisik terdekat (utk lantai anti-tabrakan)."""
     y0 = max(Lb[1], Rb[1])
     y1 = min(Lb[3], Rb[3])
     if y1 <= y0:
-        return None
-    gaps = []
-    y = y0
+        return None, None
+    ys, gapF, gapReal = [], [], []
+    y = math.ceil(y0 / step) * step
     while y <= y1:
-        l = htls._margins_at(Lc, y)   # (minx, maxx) sisi ink L
-        r = htls._margins_at(Rc, y)
-        if l[1] is not None and r[0] is not None:
-            gaps.append((Ladv - l[1]) + r[0])
+        l = Ltab.get(y); r = Rtab.get(y)
+        if l and r:
+            ys.append(y)
+            gapF.append((Ladv - l[1]) + r[3])     # celah dari margin TERISI (filledR L, filledL R)
+            gapReal.append((Ladv - l[0]) + r[2])  # celah NYATA (rawR L, rawL R)
         y += step
-    if not gaps:
-        return None
-    return sum(gaps) / len(gaps)
+    if len(ys) < 2:
+        return None, None
+    yc = (ys[0] + ys[-1]) / 2.0
+    yh = max((ys[-1] - ys[0]) / 2.0, 1.0)
+    num = den = 0.0
+    for i, yy in enumerate(ys):
+        w = 1.0 / (1.0 + ((yy - yc) / yh) ** 2)   # bobot tengah (perseptual): pusat penuh, tepi luruh
+        num += w * gapF[i]; den += w
+    return num / den, min(gapReal)
+
+
+def _kern_from_openness(openness, min_real, target, upm, deadband, clamp_frac, safe_frac):
+    """openness → nilai kern int. target = openness pasangan lurus acuan (rhythm datar font)."""
+    if openness is None:
+        return 0
+    k = target - openness
+    if k < 0:  # lantai: jaga celah nyata tersempit ≥ safe_frac×target; tak pernah paksa merenggang
+        k = max(k, min(0.0, safe_frac * target - min_real))
+    k = round(k)
+    if abs(k) < deadband:
+        return 0
+    clamp = upm * clamp_frac
+    return int(max(-clamp, min(clamp, k)))
+
+
+# Glyph referensi LURUS (sisi hadap = batang tegak) utk kalibrasi target datar. Median → tahan
+# thd satu glyph yg spacing-nya nyeleneh. Diurut dari yang paling "murni lurus".
+_FLAT_REFS = ("I", "l", "H", "N", "M", "h", "n", "u", "m", "K", "E")
+
+
+def _flat_target(font, upm, step, slope):
+    """Rhythm datar font = median openness pasangan-diri glyph lurus (I|I, H|H, …), diukur
+    dgn jalur SAMA spt pasangan biasa → pasangan lurus otomatis ~0. Fallback upm*0.16."""
+    cand = []
+    for r in _FLAT_REFS:
+        if r in font and len(font[r]) > 0:
+            p = _profiles(font[r])
+            if not p:
+                continue
+            tab, b = _glyph_margins(p[0], p[1], step, slope)
+            if not tab:
+                continue
+            op, _ = _pair_openness(tab, b, font[r].width, tab, b, step)
+            if op is not None:
+                cand.append(op)
+    if cand:
+        return statistics.median(cand)
+    return upm * 0.16
+
+
+def _deadband(upm):
+    return max(2, round(0.008 * upm))  # ~0.8% em: buang koreksi tak kasat mata
 
 
 def _side_signature(contours, b, side, samples, upm):
@@ -80,148 +198,75 @@ def _side_signature(contours, b, side, samples, upm):
     return tuple(depth)
 
 
-def _reference_target(font, upm, step, refs=("n", "H", "o", "x", "m", "u")):
-    """Celah 'datar' acuan = avgGap pasangan referensi lurus (mis. n|n). Basis kalibrasi
-    smart kern: pasangan yang lebih 'terbuka' dari acuan → kern negatif (rapatkan)."""
-    for ref in refs:
-        if ref in font:
-            p = _profiles(font[ref])
-            if p:
-                t = _avg_gap(p[0], font[ref].width, p[0], step)
-                if t is not None:
-                    return t
-    return upm * 0.16
-
-
-def _pair_gaps(Lc, Ladv, Rc, step):
-    """Daftar (y, celah) berhadapan antara sisi kanan L dan sisi kiri R pada tiap ketinggian y
-    (hanya di rentang tinggi tempat KEDUANYA punya tinta)."""
-    Lb = htls._bounds(Lc)
-    Rb = htls._bounds(Rc)
-    y0 = max(Lb[1], Rb[1])
-    y1 = min(Lb[3], Rb[3])
-    if y1 <= y0:
-        return []
-    out = []
-    y = y0
-    while y <= y1:
-        l = htls._margins_at(Lc, y)
-        r = htls._margins_at(Rc, y)
-        if l[1] is not None and r[0] is not None:
-            out.append((y, (Ladv - l[1]) + r[0]))
-        y += step
-    return out
-
-
-def _kern_from_gaps(gaps, target, upm, deadband, clamp_frac):
-    """Model optik v2 — dua prinsip, keduanya DITURUNKAN dari font itu sendiri (target = celah
-    pasangan lurus referensi milik font, jadi ikut gelap-terang/style font):
-
-    1. RATA-RATA TERBOBOT: pusat zona overlap berbobot penuh, tepi meluruh (1/(1+t²)).
-       Efeknya bentuk menyesuaikan sendiri — lurus|lurus: celah = target; lurus|bulat: perut
-       lengkung merapat (~80-90% target, sudut terbuka di atas/bawah tak dihitung penuh);
-       diagonal/menjorok (T·o, A·V, L·T): area terbuka besar → merapat kuat.
-    2. LANTAI ANTI-TABRAKAN: kern negatif tak boleh membuat celah MINIMUM < 30% target —
-       bentuk runcing/serif tak akan bersentuhan; dan lantai tak pernah MEMAKSA merenggang.
-    """
-    if not gaps:
-        return 0
-    y0 = min(y for y, _ in gaps)
-    y1 = max(y for y, _ in gaps)
-    yc = (y0 + y1) / 2.0
-    ys = max((y1 - y0) / 2.0, 1.0)
-    num = den = 0.0
-    for y, g in gaps:
-        w = 1.0 / (1.0 + ((y - yc) / ys) ** 2)
-        num += w * g
-        den += w
-    k = target - num / den
-    if k < 0:
-        min_gap = min(g for _, g in gaps)
-        floor = 0.30 * target
-        k = max(k, min(0.0, floor - min_gap))  # rapatkan maksimal sampai celah tersempit = lantai
-    k = round(k)
-    if abs(k) < deadband:
-        return 0
-    clamp = upm * clamp_frac
-    return int(max(-clamp, min(clamp, k)))
-
-
-def smart_pair(font, left, right, *, upm, step=10, deadband=3, clamp_frac=0.18, target=None):
-    """Kern optikal (sadar-bentuk) untuk SATU pasangan. TIDAK menulis apa pun — hanya menghitung.
-    Return int (0 bila tak ada data atau dalam deadband)."""
+def smart_pair(font, left, right, *, upm, step=10, slope=1.0, deadband=None,
+               clamp_frac=0.15, safe_frac=0.20, target=None):
+    """Kern optikal SADAR-BENTUK untuk SATU pasangan (model v3: cone-fill + openness).
+    TIDAK menulis apa pun — hanya menghitung. Return int (0 bila tak ada data / dalam deadband)."""
     if left not in font or right not in font:
         return 0
     Lp = _profiles(font[left])
     Rp = _profiles(font[right])
     if not Lp or not Rp:
         return 0
+    if deadband is None:
+        deadband = _deadband(upm)
     if target is None:
-        target = _reference_target(font, upm, step)
-    gaps = _pair_gaps(Lp[0], font[left].width, Rp[0], step)
-    return _kern_from_gaps(gaps, target, upm, deadband, clamp_frac)
+        target = _flat_target(font, upm, step, slope)
+    Ltab, Lb = _glyph_margins(Lp[0], Lp[1], step, slope)
+    Rtab, Rb = _glyph_margins(Rp[0], Rp[1], step, slope)
+    op, min_real = _pair_openness(Ltab, Lb, font[left].width, Rtab, Rb, step)
+    return _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac)
 
 
-def auto_kern_pairs(font, names, *, upm, step=10, deadband=6, clamp_frac=0.18, target=None):
-    """Kern optikal untuk SEMUA pasangan berurutan dari `names`. Return {(L,R): int} hanya utk
-    |v|>=deadband. TIDAK menulis. Tabel margin per glyph DIPRAKOMPUTASI pada grid-y bersama
-    (kelipatan `step`) → tiap pasangan tinggal lookup, bukan scan segmen O(n²) (yang membuat
-    font berkontur rumit makan waktu bermenit-menit & menahan lock tulis)."""
-    import math
-    data = {}
+def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
+                    clamp_frac=0.15, safe_frac=0.20, target=None):
+    """Kern optikal SADAR-BENTUK (model v3) untuk SEMUA pasangan berurutan dari `names`. Return
+    {(L,R): int} hanya utk |v|>=deadband. TIDAK menulis. Tabel margin per glyph (mentah + cone-fill
+    45°) DIPRAKOMPUTASI SEKALI di grid-y bersama → tiap pasangan tinggal lookup+bobot, bukan scan
+    O(n²) (yg membuat font berkontur rumit makan waktu bermenit & menahan lock tulis)."""
+    if deadband is None:
+        deadband = _deadband(upm)
+    tables = {}  # n -> (tab, bounds); tab: y -> (rawR, filledR, rawL, filledL)
     for n in names:
         if n in font:
             p = _profiles(font[n])
             if p:
-                data[n] = p
-    ns = [n for n in names if n in data]
+                tab, b = _glyph_margins(p[0], p[1], step, slope)
+                if tab:
+                    tables[n] = (tab, b)
+    ns = [n for n in names if n in tables]
     if target is None:
-        target = _reference_target(font, upm, step)
-    clamp = upm * clamp_frac
-    # tabel margin per glyph: y (grid bersama) -> (minX, maxX)
-    tables = {}
-    for n in ns:
-        c, b = data[n]
-        tab = {}
-        y = math.ceil(b[1] / step) * step
-        while y <= b[3]:
-            mn, mx = htls._margins_at(c, y)
-            if mn is not None:
-                tab[y] = (mn, mx)
-            y += step
-        tables[n] = (tab, b)
+        target = _flat_target(font, upm, step, slope)
     out = {}
     for L in ns:
         Ltab, Lb = tables[L]
         Ladv = font[L].width
         for R in ns:
             Rtab, Rb = tables[R]
-            y0 = max(Lb[1], Rb[1])
-            y1 = min(Lb[3], Rb[3])
-            if y1 <= y0:
-                continue
-            gaps = []
-            y = math.ceil(y0 / step) * step
-            while y <= y1:
-                l = Ltab.get(y)
-                r = Rtab.get(y)
-                if l and r:
-                    gaps.append((y, (Ladv - l[1]) + r[0]))
-                y += step
-            k = _kern_from_gaps(gaps, target, upm, deadband, clamp_frac)  # model optik v2 (sama dgn Smart per-pasangan)
+            op, min_real = _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step)
+            k = _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac)
             if k:
                 out[(L, R)] = k
     return out
 
 
 def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
-                  deadband=8, step=10, samples=10, clamp_frac=0.15):
-    """Hitung & tulis seed kerning class-level ke `font`. Return dict laporan."""
-    data = {}
+                  deadband=None, step=10, samples=10, slope=1.0,
+                  clamp_frac=0.15, safe_frac=0.20):
+    """Hitung & tulis SEED kerning class-level ke `font` (dipakai saat impor). Grouping per bentuk
+    sisi; nilai per pasangan-kelas memakai model optik v3 yang SAMA dgn Smart Kerning → seed sudah
+    seimbang & konsisten dgn hasil tombol Smart. Return dict laporan."""
+    if deadband is None:
+        deadband = _deadband(upm)
+    data = {}      # n -> (contours, bounds)
+    margins = {}   # n -> (tab, bounds) tabel margin cone-fill
     for n in glyph_names:
         p = _profiles(font[n])
         if p:
-            data[n] = p  # (contours, bounds)
+            data[n] = p
+            tab, b = _glyph_margins(p[0], p[1], step, slope)
+            if tab:
+                margins[n] = (tab, b)
     names = [n for n in glyph_names if n in data]
 
     # --- grouping per bentuk sisi ---
@@ -240,33 +285,27 @@ def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
     g1_of = {g: gname for gname, gs in kern1_groups.items() for g in gs}
     g2_of = {g: gname for gname, gs in kern2_groups.items() for g in gs}
 
-    # --- target dari pasangan referensi flat ---
+    # --- target = rhythm datar font (median pasangan lurus), jalur ukur sama dgn pasangan ---
     if target is None:
-        if reference in data:
-            rc, rb = data[reference]
-            target = _avg_gap(rc, font[reference].width, rc, step)
-        if target is None:
-            # fallback: median avgGap pasangan eksemplar lurus -> pakai 2*sidebearing rata2
-            target = upm * 0.16
+        target = _flat_target(font, upm, step, slope)
 
-    clamp = upm * clamp_frac
     # --- kern per pasangan kelas (eksemplar) ---
     pairs = {}
     for g1name, m1 in kern1_groups.items():
         Lname = m1[0]
-        Lc, _ = data[Lname]
+        if Lname not in margins:
+            continue
+        Ltab, Lb = margins[Lname]
         Ladv = font[Lname].width
         for g2name, m2 in kern2_groups.items():
             Rname = m2[0]
-            Rc, _ = data[Rname]
-            avg = _avg_gap(Lc, Ladv, Rc, step)
-            if avg is None:
+            if Rname not in margins:
                 continue
-            k = round(target - avg)
-            if abs(k) < deadband:
-                continue
-            k = max(-clamp, min(clamp, k))
-            pairs[(g1name, g2name)] = int(k)
+            Rtab, Rb = margins[Rname]
+            op, min_real = _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step)
+            k = _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac)
+            if k:
+                pairs[(g1name, g2name)] = k
 
     # --- tulis ke UFO ---
     for gname, members in {**kern1_groups, **kern2_groups}.items():
