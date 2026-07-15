@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Upload, FileType2, Loader2 } from "lucide-react";
 import { api } from "../api";
+import logo from "../assets/logo.svg";
 import type { ProjectState } from "../types";
 
 const PRESETS = ["display-serif", "text-serif", "text-sans", "display-sans"];
@@ -54,10 +55,11 @@ export function ImportScreen({
   }
 
   return (
-    <div className="h-full overflow-auto grid place-items-center p-8">
+    <div className="h-full overflow-auto grid place-items-center p-8 relative">
+      <div className="app-drag absolute top-0 inset-x-0" style={{ height: 34 }} />
       <div className="w-full max-w-2xl">
         <div className="flex items-center gap-3 mb-1">
-          <div className="size-9 rounded-xl bg-accent grid place-items-center text-white font-bold">S</div>
+          <img src={logo} alt="Sensatype" draggable={false} className="size-9 rounded-xl" />
           <h1 className="text-2xl font-semibold tracking-tight">Sensatype Font Tool</h1>
         </div>
         <p className="text-muted mb-7">SVG → OTF / TTF / WOFF / WOFF2 — satu pipeline, tanpa kerja dua kali.</p>

@@ -294,6 +294,13 @@ function createWindow() {
     ...(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? { x: saved.x, y: saved.y } : {}),
     minWidth: 1000, minHeight: 640,
     backgroundColor: "#14171d", show: false,
+    // Buang bilah judul OS yang terang → konten gelap app naik sampai atas (seperti app native modern).
+    // macOS: tombol lampu-lalu-lintas dibiarkan, digeser agar pas di tengah header 52px.
+    // Windows/Linux: gambar tombol min/maks/tutup di atas konten dengan warna gelap agar menyatu.
+    titleBarStyle: "hidden",
+    ...(process.platform === "darwin"
+      ? { trafficLightPosition: { x: 16, y: 18 } }
+      : { titleBarOverlay: { color: "#12151c", symbolColor: "#e7eaf0", height: 52 } }),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

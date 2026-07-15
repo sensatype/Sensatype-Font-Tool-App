@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("sensatype", {
   isElectron: true,
+  platform: process.platform, // "darwin" | "win32" | "linux" — utk padding tombol lampu-lalu-lintas (mac)
   openExternal: (url) => ipcRenderer.invoke("sensatype:open-external", url),
   // Bawa jendela app ke depan (dipakai setelah login sukses → "buka app, bukan web").
   focus: () => ipcRenderer.invoke("sensatype:focus"),

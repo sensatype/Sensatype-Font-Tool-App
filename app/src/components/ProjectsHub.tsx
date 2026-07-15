@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { FolderOpen, Plus, Trash2, Loader2, Type, Pencil } from "lucide-react";
 import { api, type ProjectSummary } from "../api";
 import { AccountChip } from "./AccountChip";
+import logo from "../assets/logo.svg";
 
 function rel(ts: number): string {
   const s = Math.max(1, Math.floor((Date.now() - ts) / 1000));
@@ -81,8 +82,12 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
 
   return (
     <div className="h-full overflow-auto">
+      {/* bilah judul OS disembunyikan → strip atas (fixed) menjaga jendela bisa diseret; tinggi 30px
+          < padding p-8, jadi tak menutupi baris header (di y≈32). Tombol lampu-lalu-lintas macOS di sini. */}
+      <div className="app-drag fixed top-0 left-0 right-0 z-10" style={{ height: 30 }} />
       <div className="max-w-5xl mx-auto p-8">
         <div className="flex items-center gap-3 mb-6">
+          <img src={logo} alt="Sensatype" draggable={false} className="size-7 rounded-lg shrink-0" />
           <h1 className="text-xl font-semibold">Project Anda</h1>
           {items && <span className="text-muted text-sm">{items.length} project</span>}
           <div className="ml-auto flex items-center gap-3">

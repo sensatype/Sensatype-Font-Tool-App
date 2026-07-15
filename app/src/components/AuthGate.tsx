@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { Loader2, LogIn, ExternalLink, ShieldX } from "lucide-react";
 import { authApi, focusApp, isElectron, openLoginUrl, type Session } from "../auth";
 import { setUnauthorizedHandler } from "../api";
+import logo from "../assets/logo.svg";
 
 // Konteks auth untuk komponen di dalam app (mis. TopBar): identitas akun + logout.
 type AuthCtx = {
@@ -141,7 +142,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <Screen>
-      <div className="size-12 rounded-2xl bg-accent grid place-items-center text-white font-bold text-lg">S</div>
+      <img src={logo} alt="Sensatype" draggable={false} className="size-12 rounded-2xl" />
       <h1 className="text-lg font-semibold">Sensatype Font Tool</h1>
       <p className="text-muted text-sm max-w-xs text-center">
         Masuk dengan akun Sensatype untuk melanjutkan. Login diverifikasi di server Sensatype
@@ -157,7 +158,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
 function Screen({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-full grid place-items-center">
+    <div className="h-full grid place-items-center relative">
+      {/* bilah judul OS disembunyikan → strip atas ini menjaga jendela tetap bisa diseret di layar
+          login/loading (yang tak punya header app). Konten login di tengah, jadi tak terhalang. */}
+      <div className="app-drag absolute top-0 inset-x-0" style={{ height: 52 }} />
       <div className="flex flex-col items-center gap-3">{children}</div>
     </div>
   );

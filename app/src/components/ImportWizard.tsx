@@ -3,6 +3,7 @@ import { Upload, Loader2, Trash2, Combine, Scissors, Eye, ArrowRight, ArrowLeft,
 import { api } from "../api";
 import { SpecimenCanvas } from "./SpecimenCanvas";
 import { AccountChip } from "./AccountChip";
+import logo from "../assets/logo.svg";
 import type { ProjectState, StagedShape, StagingState } from "../types";
 
 type Step = "upload" | "clean" | "map";
@@ -138,6 +139,7 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
   if (step === "upload") {
     return (
       <div className="h-full overflow-auto grid place-items-center p-8 relative">
+        <div className="app-drag absolute top-0 inset-x-0" style={{ height: 34 }} />
         {/* Kembali ke daftar project + akun (profil + nama) → keduanya bisa diakses di sini juga. */}
         <div className="absolute top-4 right-4 flex items-center gap-2">
           {onHome && (
@@ -149,7 +151,7 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
         </div>
         <div className="w-full max-w-xl">
           <div className="flex items-center gap-3 mb-1">
-            <div className="size-9 rounded-xl bg-accent grid place-items-center text-white font-bold">S</div>
+            <img src={logo} alt="Sensatype" draggable={false} className="size-9 rounded-xl" />
             <h1 className="text-2xl font-semibold tracking-tight">Sensatype Font Tool</h1>
           </div>
           <p className="text-muted mb-6">Impor specimen SVG → urai per glyph (urutan baca) → bersihkan → petakan → font.</p>
@@ -335,9 +337,9 @@ function AltLigMenu({ alt, setAlt, lig, setLig, onApply }: {
 
 function WizardBar({ step, title, sub, left, right }: any) {
   return (
-    <header className="flex items-center gap-4 px-4 border-b shrink-0" style={{ borderColor: "var(--border)", background: "var(--bg-2)", height: 56 }}>
+    <header className="app-drag titlebar-pad flex items-center gap-4 px-4 border-b shrink-0" style={{ borderColor: "var(--border)", background: "var(--bg-2)", height: 56 }}>
       <div className="flex items-center gap-2.5">
-        <div className="size-7 rounded-lg bg-accent grid place-items-center text-white font-bold text-sm">S</div>
+        <img src={logo} alt="Sensatype" draggable={false} className="size-7 rounded-lg shrink-0" />
         <div className="flex flex-col leading-tight">
           <span className="font-semibold text-sm">{title} <span className="text-faint font-normal">· langkah {step}/3</span></span>
           <span className="text-faint text-[11px]">{sub}</span>

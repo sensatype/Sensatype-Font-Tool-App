@@ -5,6 +5,7 @@ declare global {
   interface Window {
     sensatype?: {
       isElectron: boolean;
+      platform?: string; // "darwin" | "win32" | "linux"
       openExternal: (url: string) => Promise<boolean>;
       focus?: () => Promise<boolean>;
     };

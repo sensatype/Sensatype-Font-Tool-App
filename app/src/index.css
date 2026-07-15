@@ -66,6 +66,17 @@ input, textarea, [contenteditable="true"], .selectable {
   user-select: text;
 }
 
+/* Bilah judul OS disembunyikan (titleBarStyle:hidden) → jendela diseret lewat area ber-.app-drag
+   (header app). Elemen interaktif WAJIB no-drag agar tetap bisa diklik. */
+.app-drag { -webkit-app-region: drag; app-region: drag; }
+.app-drag button, .app-drag input, .app-drag select, .app-drag textarea, .app-drag a,
+.app-drag [role="button"], .app-no-drag {
+  -webkit-app-region: no-drag; app-region: no-drag;
+}
+/* macOS: sisakan ruang utk tombol lampu-lalu-lintas (kiri). Kelas is-mac dipasang dari platform
+   Electron (window.sensatype.platform) — di Windows/Linux kontrol ada di kanan, jadi tak perlu. */
+:root.is-mac .titlebar-pad { padding-left: 78px; }
+
 /* number input tanpa spinner */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }

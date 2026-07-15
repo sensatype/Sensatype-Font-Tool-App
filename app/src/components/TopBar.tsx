@@ -3,6 +3,7 @@ import { Download, RefreshCw, FolderOpen, Loader2, Eraser } from "lucide-react";
 import { api } from "../api";
 import { can } from "../auth";
 import { AccountChip } from "./AccountChip";
+import logo from "../assets/logo.svg";
 import type { ProjectState } from "../types";
 
 // window.showSaveFilePicker (File System Access API) — ada di Chromium/Electron pada konteks aman (localhost).
@@ -73,11 +74,11 @@ export function TopBar({
 
   return (
     <header
-      className="flex items-center gap-4 px-4 h-13 border-b shrink-0"
+      className="app-drag titlebar-pad flex items-center gap-4 px-4 h-13 border-b shrink-0"
       style={{ borderColor: "var(--border)", background: "var(--bg-2)", height: 52 }}
     >
       <div className="flex items-center gap-2.5">
-        <div className="size-7 rounded-lg bg-accent grid place-items-center text-white font-bold text-sm">S</div>
+        <img src={logo} alt="Sensatype" draggable={false} className="size-7 rounded-lg shrink-0" />
         <span className="font-semibold tracking-tight">Sensatype</span>
       </div>
       <div className="h-5 w-px" style={{ background: "var(--border-2)" }} />
