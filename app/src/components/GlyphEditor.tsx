@@ -1805,10 +1805,14 @@ export function GlyphEditor({
                 )}
               </div>
             )}
-            <button className="btn !py-1.5" onClick={expandKernClasses} disabled={kernBusy}
-              title="Gabungkan varian aksen (Á,Â,Ä…) ke kelas huruf dasarnya → kern dasar otomatis berlaku utk aksen. Sekali jalan; mengubah groups + kerning.">
-              {kernBusy ? <Loader2 className="size-4 animate-spin" /> : <Combine className="size-4" />}Perluas kelas
-            </button>
+            {/* "Perluas kelas" = operasi KELAS kern (gabung varian aksen ke kelas huruf dasar) →
+                hanya relevan di scope "Kelas", spt "Auto-kern semua" yang hanya di scope "Smart". */}
+            {kernScope === "class" && (
+              <button className="btn !py-1.5" onClick={expandKernClasses} disabled={kernBusy}
+                title="Gabungkan varian aksen (Á,Â,Ä…) ke kelas huruf dasarnya → kern dasar otomatis berlaku utk aksen. Sekali jalan; mengubah groups + kerning.">
+                {kernBusy ? <Loader2 className="size-4 animate-spin" /> : <Combine className="size-4" />}Perluas kelas
+              </button>
+            )}
             {/* "Nolkan semua kerning" dipindah ke TopBar (samping kiri "Re-seed") — aksi font-wide global. */}
             <span className="text-xs ml-auto whitespace-nowrap hidden lg:block" style={{ color: kernDirty ? "#e8a13a" : "var(--faint)" }}>
               {kernDirty
