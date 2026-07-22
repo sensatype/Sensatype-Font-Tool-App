@@ -11,6 +11,7 @@ import io
 import json
 import os
 import shutil
+import statistics
 import sys
 import threading
 import time
@@ -795,6 +796,56 @@ class Project:
                     g2[m] = gname
         return g1, g2
 
+    # Kunci lib UFO: daftar pasangan yang nilainya DITETAPKAN PENGGUNA (bukan hasil auto-kern).
+    # UFO tak punya provenance kerning, jadi kita catat sendiri. Ditulis HANYA oleh set_kerning —
+    # auto_kern_all menulis langsung ke font.kerning, jadi tak pernah mengaku sbg buatan pengguna.
+    KERN_CUSTOM_LIB = "com.sensatype.kern.custom"
+
+    @staticmethod
+    def _custom_keys(font):
+        v = font.lib.get(Project.KERN_CUSTOM_LIB)
+        return set(v) if isinstance(v, list) else set()
+
+    @staticmethod
+    def _resolve_kern(font, g1, g2, left, right):
+        """Nilai kern EFEKTIF (urutan resolusi §9.6, sama dgn get_kern) dari font yang sudah dibuka
+        — dipakai saat menilai banyak pasangan sekaligus tanpa membuka ulang UFO tiap kali."""
+        lg, rg = g1.get(left), g2.get(right)
+        for k in ([(left, right)] + ([(left, rg)] if rg else [])
+                  + ([(lg, right)] if lg else []) + ([(lg, rg)] if lg and rg else [])):
+            if k in font.kerning:
+                return int(font.kerning[k])
+        return 0
+
+    def _learn_strength(self, font, upm, mode, custom):
+        """Pelajari SELERA pengguna dari pasangan yang dia kustom sendiri.
+
+        Model kern: k = (target − openness) × strength. Jadi rasio (nilai pengguna / saran sistem)
+        adalah pengali kekuatan yang dia inginkan — mis. rasio 1,2 = "rapatkan 20% lebih dari saran".
+        Median dipakai agar satu pencilan tak menyeret hasil. Pasangan yang sarannya ~0 dibuang
+        (rasionya meledak). Di-clamp 0,5–2,0 supaya kustom ekstrem pada 1-2 pasangan tak merusak
+        seluruh font. Return (pengali, jumlah pasangan yang benar-benar dipakai)."""
+        tgt = kerning_mod.flat_target(font, upm)
+        g1, g2 = self._kern_groups(font)
+        ratios = []
+        for key in custom:
+            parts = key.split(" ")
+            if len(parts) != 2:
+                continue
+            l, r = parts
+            if l not in font or r not in font:
+                continue  # glyph sudah dihapus/ganti nama
+            sysv = kerning_mod.smart_pair(font, l, r, upm=upm, mode=mode, target=tgt)
+            if abs(sysv) < 12:
+                continue  # saran ~nol → rasio tak bermakna
+            userv = self._resolve_kern(font, g1, g2, l, r)
+            if userv == 0:
+                continue
+            ratios.append(userv / sysv)
+        if len(ratios) < 2:  # satu contoh belum cukup jadi "selera"
+            return 1.0, len(ratios)
+        return max(0.5, min(2.0, statistics.median(ratios))), len(ratios)
+
     def get_kern(self, left, right):
         font = self._font()
         g1, g2 = self._kern_groups(font)
@@ -877,9 +928,23 @@ class Project:
             u = font[n].unicode
             if u and (0x41 <= u <= 0x5A or 0x61 <= u <= 0x7A or 0x30 <= u <= 0x39):
                 names.append(n)
-        pairs = kerning_mod.auto_kern_pairs(font, names, upm=upm, mode=mode)
         g1, g2 = self._kern_groups(font)
-        written = skipped = 0
+        # PROVENANCE: pasangan yang ditetapkan pengguna. Dipetakan ke KUNCI KELAS karena di situlah
+        # nilainya benar-benar tersimpan — pasangan lain se-kelas menunjuk kunci yang sama, jadi
+        # mempertahankan per-glyph saja tetap akan tertimpa oleh tetangganya.
+        custom = self._custom_keys(font)
+        custom_keys = set()
+        for k in custom:
+            p = k.split(" ")
+            if len(p) == 2:
+                custom_keys.add((g1.get(p[0]) or p[0], g2.get(p[1]) or p[1]))
+        # TIMPA SEMUA: pelajari selera pengguna dari kustomisasinya, lalu terapkan ke pasangan LAIN.
+        # (mode "isi yang kosong" tak menyentuh nilai lama → tak ada yang perlu diselaraskan)
+        scale, learned_from = 1.0, 0
+        if not only_empty and custom:
+            scale, learned_from = self._learn_strength(font, upm, mode, custom)
+        pairs = kerning_mod.auto_kern_pairs(font, names, upm=upm, mode=mode, strength_scale=scale)
+        written = skipped = preserved = 0
         done = set()
         for (L, R), v in pairs.items():
             lg, rg = g1.get(L), g2.get(R)
@@ -889,6 +954,9 @@ class Project:
             if key in done:
                 continue  # anggota grup lain sudah menulis kunci kelas yang sama (nilai ~identik)
             done.add(key)
+            if not only_empty and key in custom_keys:
+                preserved += 1
+                continue  # nilai pengguna = ACUAN yang dipelajari → jangan ditimpa
             if only_empty:
                 keys = [(L, R)] + ([(lg, R)] if lg else []) + ([(L, rg)] if rg else []) + ([(lg, rg)] if lg and rg else [])
                 if any(k in font.kerning for k in keys):
@@ -918,7 +986,9 @@ class Project:
             if recompile:
                 self.compile_static()
         return {"candidates": len(names), "computed": len(pairs), "written": written,
-                "skipped": skipped, "mode": kerning_mod.resolve_mode(mode)}
+                "skipped": skipped, "preserved": preserved, "mode": kerning_mod.resolve_mode(mode),
+                # apa yang DIPELAJARI dari kustomisasi pengguna (1.0 = tak ada / belum cukup contoh)
+                "learnedScale": round(scale, 3), "learnedFrom": learned_from}
 
     @_locked
     def expand_kern_groups(self):
@@ -1015,6 +1085,14 @@ class Project:
                 font.kerning.pop((l, r), None)
         else:
             font.kerning[(l, r)] = v
+        # Catat sbg KUSTOM PENGGUNA (provenance). set_kerning hanya dipanggil dari aksi pengguna —
+        # auto_kern_all menulis langsung ke font.kerning → tak pernah tercatat di sini. Dipakai
+        # "Timpa semua" untuk MEMPELAJARI selera & mempertahankan nilai ini. Nilai 0 yang menghapus
+        # kunci = pembatalan, jadi catatannya ikut dicabut.
+        keys = self._custom_keys(font)
+        pk = f"{left} {right}"
+        keys.discard(pk) if v == 0 else keys.add(pk)
+        font.lib[self.KERN_CUSTOM_LIB] = sorted(keys)
         font.save(self.ufo_path, overwrite=True)
         if recompile:
             self.compile_static()

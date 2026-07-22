@@ -169,7 +169,8 @@ export const api = {
     fetch(`${BASE}/kerning/auto`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ onlyEmpty, recompile: false, mode }),
-    }).then(j<{ candidates: number; computed: number; written: number; skipped: number; mode: KernMode }>),
+    }).then(j<{ candidates: number; computed: number; written: number; skipped: number;
+                preserved: number; mode: KernMode; learnedScale: number; learnedFrom: number }>),
 
   setKerning: (body: { left: string; right: string; value: number; scope?: "class" | "pair"; recompile?: boolean }) =>
     fetch(`${BASE}/kerning`, {

@@ -355,7 +355,18 @@ export function GlyphEditor({
     try {
       const r = await serial(() => api.autoKernAll(onlyEmpty, kernMode));
       onKern?.(); // bump editV → panel & webfont menyusul
-      alert(`Auto-kern selesai:\n${r.written} pasangan ditulis · ${r.skipped} dilewati\ndari ${r.candidates} glyph huruf/angka.`);
+      // Laporkan apa yang DIPELAJARI dari kustomisasi — supaya jelas hasilnya mengikuti selera
+      // pengguna, bukan diam-diam kembali ke rekomendasi sistem.
+      const pct = Math.round((r.learnedScale - 1) * 100);
+      const belajar = r.learnedFrom >= 2 && pct !== 0
+        ? `\n\nMengikuti selera Anda: ${pct > 0 ? "+" : ""}${pct}% dari saran sistem `
+          + `(dipelajari dari ${r.learnedFrom} pasangan yang Anda kustom).\n`
+          + `${r.preserved} pasangan kustom Anda dipertahankan apa adanya.`
+        : r.learnedFrom === 1
+          ? "\n\nBaru 1 pasangan kustom — belum cukup untuk menyimpulkan selera, jadi dipakai saran sistem apa adanya."
+          : "";
+      alert(`Auto-kern selesai:\n${r.written} pasangan ditulis · ${r.skipped} dilewati\n`
+        + `dari ${r.candidates} glyph huruf/angka.${belajar}`);
     } catch (e) {
       alert("Auto-kern gagal: " + ((e as Error).message || e));
     } finally {

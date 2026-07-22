@@ -245,8 +245,15 @@ def smart_pair(font, left, right, *, upm, step=10, slope=1.0, deadband=None,
                                strength_of(mode))
 
 
+def flat_target(font, upm, step=10, slope=1.0):
+    """Rhythm datar font (publik) — dipakai backend utk menghitung saran banyak pasangan tanpa
+    mengulang kalibrasi tiap panggilan."""
+    return _flat_target(font, upm, step, slope)
+
+
 def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
-                    clamp_frac=0.15, safe_frac=0.20, target=None, mode=None):
+                    clamp_frac=0.15, safe_frac=0.20, target=None, mode=None,
+                    strength_scale=1.0):
     """Kern optikal SADAR-BENTUK (model v3) untuk SEMUA pasangan berurutan dari `names`. Return
     {(L,R): int} hanya utk |v|>=deadband. TIDAK menulis. Tabel margin per glyph (mentah + cone-fill
     45°) DIPRAKOMPUTASI SEKALI di grid-y bersama → tiap pasangan tinggal lookup+bobot, bukan scan
@@ -264,7 +271,9 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
     ns = [n for n in names if n in tables]
     if target is None:
         target = _flat_target(font, upm, step, slope)
-    strength = strength_of(mode)
+    # strength_scale = SELERA pengguna yang dipelajari (rasio nilai yang dia tetapkan thd saran
+    # sistem). Menskalakan KEKUATAN koreksi, bukan menambah offset → pasangan lurus tetap 0.
+    strength = strength_of(mode) * strength_scale
     out = {}
     for L in ns:
         Ltab, Lb = tables[L]
