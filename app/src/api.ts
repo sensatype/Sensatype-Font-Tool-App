@@ -148,7 +148,9 @@ export const api = {
       .then(j<{ pairs: KernListEntry[]; total: number; matched: number }>),
 
   // Berapa pasangan yang sudah DITETAPKAN pengguna — acuan belajar "Timpa semua". Read-only.
-  customKerns: () => fetch(`${BASE}/kerning/custom`).then(j<{ count: number; pairs: string[] }>),
+  // Status kerning: berapa pasangan milik Anda + apakah spacing sudah siap. Read-only.
+  kernStatus: () => fetch(`${BASE}/kerning/custom`).then(
+    j<{ count: number; pairs: string[]; spacingFlat: boolean; flatTarget: number; healthyTarget: number }>),
 
   // Smart kern: saran kern optikal (sadar-bentuk) utk satu pasangan — read-only.
   // mode = kerapatan pilihan user (dekat/sedang/jauh); pasangan LURUS tetap 0 di semua mode.
@@ -173,8 +175,7 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ onlyEmpty, recompile: false, mode }),
     }).then(j<{ candidates: number; computed: number; written: number; skipped: number;
-                preserved: number; mode: KernMode; learnedScale: number; learnedFrom: number;
-                learnedConflict: number; spacingFlat: boolean; flatTarget: number }>),
+                preserved: number; mode: KernMode; spacingFlat: boolean; flatTarget: number }>),
 
   setKerning: (body: { left: string; right: string; value: number; scope?: "class" | "pair"; recompile?: boolean }) =>
     fetch(`${BASE}/kerning`, {

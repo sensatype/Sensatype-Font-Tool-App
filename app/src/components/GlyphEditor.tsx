@@ -132,6 +132,10 @@ export function GlyphEditor({
     return v === "tight" || v === "loose" ? v : "medium";
   });
   const kernModeRef = useRef(kernMode); // dibaca computeSmart tanpa memicu ulang effect
+  // KESIAPAN: spacing ~0 membuat kerning mentok batas di hampir semua pasangan → hasil auto-kern
+  // nyaris tak terlihat. Ditampilkan sbg status supaya urutan kerjanya jelas (spacing → kerning),
+  // bukan sesuatu yang harus ditebak pengguna.
+  const [kernReady, setKernReady] = useState<{ spacingFlat: boolean; count: number } | null>(null);
   const [autoBusy, setAutoBusy] = useState(false); // sedang menjalankan auto-kern seluruh font
   const [autoMenu, setAutoMenu] = useState(false); // menu pilihan auto-kern (isi kosong / timpa semua)
   const [fitBusy, setFitBusy] = useState(false); // sedang merapatkan SEMUA glyph ke ink
@@ -346,6 +350,15 @@ export function GlyphEditor({
     }
     computeSmart();
   }, [kernScope, mode, computeSmart, fontV, kernLeft, kernRight]);
+  // Status kesiapan disegarkan saat masuk mode Kerning & setiap kali font berubah (Re-seed/auto-kern).
+  useEffect(() => {
+    if (mode !== "kerning") return;
+    let cancel = false;
+    api.kernStatus()
+      .then((s) => { if (!cancel) setKernReady({ spacingFlat: s.spacingFlat, count: s.count }); })
+      .catch(() => { /* status hanya informatif — jangan ganggu alur kerja */ });
+    return () => { cancel = true; };
+  }, [mode, fontV]);
   // Hitung ulang atas PERMINTAAN pengguna → cabut status "sudah ditetapkan" utk pasangan ini,
   // lalu hitung. Ini satu-satunya cara saran menimpa nilai yang sudah ditetapkan.
   const recomputeSmart = useCallback(() => {
@@ -369,21 +382,25 @@ export function GlyphEditor({
     // Beri tahu SEBELUM jalan: berapa pasangan kustom yang tercatat & apa akibatnya. Tanpa ini
     // "Timpa semua" jadi kotak hitam — pengguna mengira sistem mengabaikan seleranya, padahal
     // memang belum ada kustomisasi yang TERSIMPAN (menggeser saja tak cukup; harus Terapkan).
-    let custom = 0;
-    try { custom = (await api.customKerns()).count; } catch { /* biarkan 0 */ }
-    const belajar = !onlyEmpty
-      ? custom >= 2
-        ? `\n\nSistem akan MENGIKUTI SELERA ANDA dari ${custom} pasangan yang Anda tetapkan — pasangan itu dipertahankan, sisanya menyesuaikan.`
-        : custom === 1
-          ? "\n\nSistem akan MENGIKUTI SELERA ANDA dari 1 pasangan yang Anda tetapkan. Semakin banyak pasangan yang Anda setel, semakin tepat penyesuaiannya."
-          : "\n\nBelum ada pasangan yang Anda tetapkan, jadi hasilnya memakai saran sistem apa adanya.\nAgar sistem mengikuti selera Anda: atur beberapa pasangan → klik Terapkan → baru jalankan ini."
+    // Satu-satunya pengatur kerapatan = tombol Dekat/Sedang/Jauh (tak ada lagi "belajar selera"
+    // tersembunyi). Yang tersisa dari catatan kustom hanyalah PERLINDUNGAN: nilai Anda tak ditimpa.
+    let st: { count: number; spacingFlat: boolean } | null = null;
+    try { st = await api.kernStatus(); } catch { /* abaikan */ }
+    const lindung = !onlyEmpty && st && st.count > 0
+      ? `\n\n${st.count} pasangan yang Anda tetapkan sendiri akan DIPERTAHANKAN (tidak ditimpa).`
+      : "";
+    // Akar "kok tidak berubah": tanpa spacing, kerning mentok batas di hampir semua pasangan.
+    const spasi = st?.spacingFlat
+      ? "\n\n⚠️ Spacing font ini masih ~0 — semua glyph menempel rata ke advance-nya.\n"
+        + "Kerning jadi dipaksa menambal pekerjaan spacing, sehingga hasilnya nyaris tak terlihat.\n"
+        + "Jalankan \"Re-seed\" DULU, baru auto-kern."
       : "";
     const pending = kernDirty
-      ? "\n\n⚠️ Ada nilai yang belum Anda Terapkan — nilai itu TIDAK ikut diperhitungkan."
+      ? "\n\n⚠️ Ada nilai yang belum Anda Terapkan — nilai itu TIDAK ikut tersimpan."
       : "";
     const msg = onlyEmpty
-      ? `Auto-kern optikal pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah. Bisa memakan beberapa detik.${pending}`
-      : `Auto-kern optikal SEMUA pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.\n⚠️ Kerning yang belum Anda tetapkan akan DITIMPA hasil hitung optikal.${belajar}${pending}\n\nBisa memakan beberapa detik.`;
+      ? `Auto-kern optikal pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah.${spasi}${pending}\n\nBisa memakan beberapa detik.`
+      : `Auto-kern optikal SEMUA pasangan huruf & angka?\n\nKerapatan: ${modeLabel} — ini yang menentukan rapat/longgarnya hasil.\n⚠️ Kerning yang belum Anda tetapkan akan DITIMPA.${lindung}${spasi}${pending}\n\nBisa memakan beberapa detik.`;
     if (!confirm(msg)) return;
     setAutoBusy(true);
     try {
@@ -391,45 +408,18 @@ export function GlyphEditor({
       onKern?.(); // bump editV → panel & webfont menyusul
       // Laporkan apa yang DIPELAJARI dari kustomisasi — supaya jelas hasilnya mengikuti selera
       // pengguna, bukan diam-diam kembali ke rekomendasi sistem.
-      // SELALU laporkan hasil belajarnya — termasuk saat TIDAK belajar, beserta alasannya.
-      // Diam adalah masalahnya: pengguna tak bisa membedakan "tak ada yang dipelajari" dari "rusak".
-      const pct = Math.round((r.learnedScale - 1) * 100);
-      let belajar = "";
-      if (!onlyEmpty) {
-        if (r.learnedFrom >= 2 && pct !== 0) {
-          belajar = `\n\n✓ Mengikuti selera Anda: ${pct > 0 ? "+" : ""}${pct}% dari saran sistem `
-            + `(dipelajari dari ${r.learnedFrom} pasangan).\n`
-            + `${r.preserved} pasangan yang Anda tetapkan dipertahankan apa adanya.`;
-        } else if (r.learnedFrom >= 2) {
-          belajar = `\n\nNilai Anda ternyata ~sama dengan saran sistem (dipelajari dari ${r.learnedFrom} pasangan), jadi tak ada penyesuaian.`;
-        } else if (r.learnedFrom === 1) {
-          belajar = `\n\n✓ Mengikuti selera Anda: ${pct > 0 ? "+" : ""}${pct}% dari saran sistem (dipelajari dari 1 pasangan).\n`
-            + `${r.preserved} pasangan yang Anda tetapkan dipertahankan. Setel beberapa pasangan lagi agar penyesuaiannya makin tepat.`;
-        } else if (r.learnedConflict > 0) {
-          // Kustomnya BERLAWANAN arah dgn saran (mis. sistem merapatkan, Anda merenggangkan) →
-          // itu koreksi khas pasangan, bukan selera umum. Katakan terus terang, jangan mengarang.
-          belajar = `\n\n${r.learnedConflict} pasangan yang Anda tetapkan BERLAWANAN ARAH dengan saran sistem `
-            + "(sistem ingin merapatkan, Anda merenggangkan — atau sebaliknya).\n"
-            + "Itu koreksi khusus untuk pasangan itu sendiri, bukan selera yang bisa disalurkan ke pasangan lain, "
-            + "jadi pasangan lain memakai saran sistem.\n\n"
-            + "Agar tersalur: setel beberapa pasangan ke ARAH YANG SAMA dengan saran (mis. sama-sama lebih rapat), "
-            + "lalu jalankan ini lagi. Nilai khusus Anda tetap dipertahankan.";
-        } else {
-          belajar = "\n\nTidak ada pasangan yang Anda tetapkan, jadi dipakai saran sistem apa adanya.\n"
-            + "Agar sistem mengikuti selera Anda: atur beberapa pasangan → klik Terapkan → jalankan ini lagi.";
-        }
-      }
-      // Spacing datar = akar masalah "tak ada yang bergerak": tanpa sidebearing, kerning mentok
-      // batas di hampir semua pasangan. Sebutkan remedinya, jangan biarkan pengguna menebak.
+      // Laporan lugas: apa yang ditulis, apa yang dilindungi, dan (bila perlu) kenapa hasilnya
+      // nyaris tak terlihat. Tak ada lagi mekanisme tersembunyi yang harus dijelaskan.
+      const lindung = r.preserved > 0
+        ? `\n${r.preserved} pasangan milik Anda dipertahankan (tidak ditimpa).` : "";
       const spasi = r.spacingFlat
-        ? "\n\n⚠️ Spacing font ini masih ~0 (semua glyph menempel rata ke advance-nya).\n"
-          + "Kerning jadi dipaksa menambal pekerjaan spacing, sehingga hampir semua pasangan mentok "
-          + "batas dan penyesuaian nyaris tak terlihat.\n"
-          + "Jalankan \"Re-seed\" dulu untuk memberi jarak dasar — setelah itu auto-kern & selera Anda "
-          + "baru punya ruang bergerak."
+        ? "\n\n⚠️ Hasilnya kemungkinan nyaris tak terlihat: spacing font ini masih ~0, jadi kerning "
+          + "mentok batas di hampir semua pasangan.\nJalankan \"Re-seed\" untuk memberi jarak dasar, "
+          + "lalu auto-kern lagi."
         : "";
-      alert(`Auto-kern selesai:\n${r.written} pasangan ditulis · ${r.skipped} dilewati\n`
-        + `dari ${r.candidates} glyph huruf/angka.${belajar}${spasi}`);
+      alert(`Auto-kern selesai (kerapatan: ${modeLabel}):\n`
+        + `${r.written} pasangan ditulis · ${r.skipped} dilewati\n`
+        + `dari ${r.candidates} glyph huruf/angka.${lindung}${spasi}`);
     } catch (e) {
       alert("Auto-kern gagal: " + ((e as Error).message || e));
     } finally {
@@ -1854,10 +1844,14 @@ export function GlyphEditor({
               ? <Num label={kernDirty ? "Spasi semua*" : "Spasi semua"} value={trackVal} color={kernDirty ? "#e8a13a" : "var(--accent)"} onCommit={stageKern} title="Spasi global (em) — jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning. + renggang, − rapat. Nilai persisten; ikut export." />
               : <Num label={(kernScope === "smart" ? "Smart" : "Kern") + (kernDirty ? "*" : "")} value={kernVal} color={kernDirty ? "#e8a13a" : "var(--good)"} onCommit={stageKern} title="Nilai kern (em); + renggang, − rapat. Smart = saran optikal dari bentuk. Klik Terapkan utk menyimpan." />}
             {/* scope + nilai TERSIMPAN per level → jelas level mana yang punya nilai apa */}
-            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Semuanya = spasi global seragam ke SEMUA pasangan (letter-spacing, non-destruktif, ikut export) · Kelas = semua glyph se-grup · Pasangan = pasangan ini saja (exception) · Smart = saran kern optikal dari bentuk outline. Angka kecil = nilai tersimpan level itu.">
+            {/* Label diperjelas krn dua hal ini BUKAN sesama "level kerning":
+                · "Spasi global" itu tracking (jarak seragam SEMUA pasangan), bukan kern pasangan.
+                · "Saran" itu SUMBER nilai (hitung optikal), bukan tempat penyimpanan — hasilnya
+                  disimpan di level Kelas. Hanya Kelas & Pasangan yang benar-benar level. */}
+            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Di mana nilai disimpan: Kelas = semua glyph se-grup · Pasangan = pasangan ini saja (exception). — Spasi global BUKAN kerning: itu jarak seragam ke semua pasangan (letter-spacing). Saran = hitung nilai optikal dari bentuk outline, hasilnya disimpan di level Kelas. Angka kecil = nilai tersimpan level itu.">
               {(["all", "class", "pair", "smart"] as const).map((s) => {
                 const sv = s === "all" ? (tracking || null) : s === "class" ? kernInfo?.classValue ?? null : s === "pair" ? kernInfo?.pairValue ?? null : null;
-                const label = s === "all" ? "Semuanya" : s === "class" ? "Kelas" : s === "pair" ? "Pasangan" : "Smart";
+                const label = s === "all" ? "Spasi global" : s === "class" ? "Kelas" : s === "pair" ? "Pasangan" : "Saran";
                 return (
                   <button key={s} className="text-xs px-2 py-1 rounded-md font-medium flex items-center gap-1" onClick={() => setKernScope(s)}
                     style={{ background: kernScope === s ? "var(--accent)" : "transparent", color: kernScope === s ? "#fff" : "var(--muted)" }}>
@@ -1901,6 +1895,15 @@ export function GlyphEditor({
                 title="Hitung ulang saran Smart untuk pasangan ini. Ini SATU-SATUNYA cara saran menimpa nilai yang sudah Anda tetapkan — di luar itu nilai Anda selalu dipertahankan.">
                 {smartBusy ? <CircleNotch className="size-4 animate-spin" /> : <Sparkle className="size-4" />}Hitung ulang
               </button>
+            )}
+            {/* KESIAPAN: kerning baru berguna setelah font punya spacing. Ditampilkan terus-menerus
+                supaya pengguna tak menghabiskan waktu menyetel kern yang mentok batas. */}
+            {kernReady?.spacingFlat && (
+              <span className="text-[11px] px-2 py-1 rounded-md shrink-0"
+                    style={{ background: "color-mix(in srgb, #e8a13a 18%, transparent)", color: "#e8a13a" }}
+                    title="Semua glyph masih menempel rata ke advance-nya (sidebearing ~0), jadi kerning dipaksa menambal pekerjaan spacing dan hampir semua pasangan mentok batas. Jalankan Re-seed di bar atas untuk memberi jarak dasar.">
+                ⚠ Spacing belum diatur — Re-seed dulu
+              </span>
             )}
             {kernScope === "smart" && (
               <div className="relative">

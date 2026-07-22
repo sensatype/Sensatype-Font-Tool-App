@@ -252,8 +252,7 @@ def flat_target(font, upm, step=10, slope=1.0):
 
 
 def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
-                    clamp_frac=0.15, safe_frac=0.20, target=None, mode=None,
-                    strength_scale=1.0):
+                    clamp_frac=0.15, safe_frac=0.20, target=None, mode=None):
     """Kern optikal SADAR-BENTUK (model v3) untuk SEMUA pasangan berurutan dari `names`. Return
     {(L,R): int} hanya utk |v|>=deadband. TIDAK menulis. Tabel margin per glyph (mentah + cone-fill
     45°) DIPRAKOMPUTASI SEKALI di grid-y bersama → tiap pasangan tinggal lookup+bobot, bukan scan
@@ -271,18 +270,16 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
     ns = [n for n in names if n in tables]
     if target is None:
         target = _flat_target(font, upm, step, slope)
-    # strength_scale = SELERA pengguna yang dipelajari (rasio nilai yang dia tetapkan thd saran
-    # sistem). Menskalakan KEKUATAN koreksi, bukan menambah offset → pasangan lurus tetap 0.
-    strength = strength_of(mode) * strength_scale
-    # BATAS ikut mengalah saat pengguna minta lebih rapat (scale>1). Tanpa ini seleranya tak
-    # tersalur: pada font berspasi rapat, LANTAI anti-tabrakan mengikat hampir semua pasangan
-    # (terukur 88% tak bergerak saat kekuatan 1,0→1,3) sehingga "Timpa semua" terlihat diam.
-    # Pengguna sudah MEMBUKTIKAN menerima jarak lebih rapat — nilai yang dia tetapkan sendiri
-    # melampaui batas sistem. Lantai tetap punya dasar mutlak (0,08×target ≈ 1,2% em) agar
-    # glyph tak pernah benar-benar bertabrakan.
-    if strength_scale > 1.0:
-        clamp_frac = clamp_frac * strength_scale
-        safe_frac = max(0.08, safe_frac / strength_scale)
+    # Kerapatan pilihan pengguna = SATU-SATUNYA pengatur seberapa rapat hasilnya (dulu ada dua:
+    # mode + "belajar selera" tersembunyi — membingungkan & hasilnya sulit ditebak).
+    strength = strength_of(mode)
+    # "Dekat" harus benar-benar terasa: tanpa ini LANTAI anti-tabrakan mengikat hampir semua
+    # pasangan (terukur 85% pada font berspasi rapat) sehingga menaikkan kekuatan tak menggerakkan
+    # apa pun. Saat pengguna MEMINTA lebih rapat, batasnya ikut mengalah — dgn dasar MUTLAK
+    # 0,08×target (≈1,2% em) supaya glyph tak pernah benar-benar bertabrakan.
+    if strength > 1.0:
+        clamp_frac = clamp_frac * strength
+        safe_frac = max(0.08, safe_frac / strength)
     out = {}
     for L in ns:
         Ltab, Lb = tables[L]
