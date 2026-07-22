@@ -129,11 +129,13 @@ def _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step):
     return num / den, min(gapReal)
 
 
-def _kern_from_openness(openness, min_real, target, upm, deadband, clamp_frac, safe_frac):
-    """openness → nilai kern int. target = openness pasangan lurus acuan (rhythm datar font)."""
+def _kern_from_openness(openness, min_real, target, upm, deadband, clamp_frac, safe_frac,
+                        strength=1.0):
+    """openness → nilai kern int. target = openness pasangan lurus acuan (rhythm datar font).
+    strength = faktor mode kerapatan (lihat MODES); 1.0 = sedang."""
     if openness is None:
         return 0
-    k = target - openness
+    k = (target - openness) * strength
     if k < 0:  # lantai: jaga celah nyata tersempit ≥ safe_frac×target; tak pernah paksa merenggang
         k = max(k, min(0.0, safe_frac * target - min_real))
     k = round(k)
@@ -172,6 +174,29 @@ def _deadband(upm):
     return max(2, round(0.008 * upm))  # ~0.8% em: buang koreksi tak kasat mata
 
 
+# ── mode kerapatan (pilihan pengguna: dekat / sedang / jauh) ────────────────────
+# Faktor KEKUATAN koreksi optik, bukan skala target. Bedanya penting:
+#   - skala kekuatan: pasangan LURUS tetap 0 di semua mode (openness == target → k = 0), jadi
+#     spacing yang sudah dirancang TIDAK dilawan; yang berubah hanya seberapa agresif pasangan
+#     terbuka/bulat/diagonal dirapatkan.
+#   - skala target (ditolak): membuat H|H ikut ter-kern (mis. +18 saat "jauh") — itu pekerjaan
+#     tracking "Spasi semua", bukan kerning, dan dua kontrol jadi saling tabrakan.
+# Lantai anti-tabrakan TIDAK ikut diskalakan (batas fisik, bukan selera) → "dekat" tetap aman.
+MODES = {"tight": 1.20, "medium": 1.00, "loose": 0.80}
+DEFAULT_MODE = "medium"
+
+
+def resolve_mode(mode):
+    """Nama mode → nama KANONIK yang benar-benar dipakai (tak dikenal / None → default).
+    Dipakai backend utk meng-echo mode yang SUNGGUH diterapkan, bukan yang diminta."""
+    return mode if mode in MODES else DEFAULT_MODE
+
+
+def strength_of(mode):
+    """Nama mode → faktor kekuatan. Nama tak dikenal / None → default (sedang)."""
+    return MODES[resolve_mode(mode)]
+
+
 def _side_signature(contours, b, side, samples, upm):
     """Tanda-tangan BENTUK satu sisi (kedalaman ink dari ekstrem), terlepas dari sidebearing."""
     minY, maxY = b[1], b[3]
@@ -199,8 +224,9 @@ def _side_signature(contours, b, side, samples, upm):
 
 
 def smart_pair(font, left, right, *, upm, step=10, slope=1.0, deadband=None,
-               clamp_frac=0.15, safe_frac=0.20, target=None):
+               clamp_frac=0.15, safe_frac=0.20, target=None, mode=None):
     """Kern optikal SADAR-BENTUK untuk SATU pasangan (model v3: cone-fill + openness).
+    mode = "tight"/"medium"/"loose" (lihat MODES); None = sedang.
     TIDAK menulis apa pun — hanya menghitung. Return int (0 bila tak ada data / dalam deadband)."""
     if left not in font or right not in font:
         return 0
@@ -215,11 +241,12 @@ def smart_pair(font, left, right, *, upm, step=10, slope=1.0, deadband=None,
     Ltab, Lb = _glyph_margins(Lp[0], Lp[1], step, slope)
     Rtab, Rb = _glyph_margins(Rp[0], Rp[1], step, slope)
     op, min_real = _pair_openness(Ltab, Lb, font[left].width, Rtab, Rb, step)
-    return _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac)
+    return _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac,
+                               strength_of(mode))
 
 
 def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
-                    clamp_frac=0.15, safe_frac=0.20, target=None):
+                    clamp_frac=0.15, safe_frac=0.20, target=None, mode=None):
     """Kern optikal SADAR-BENTUK (model v3) untuk SEMUA pasangan berurutan dari `names`. Return
     {(L,R): int} hanya utk |v|>=deadband. TIDAK menulis. Tabel margin per glyph (mentah + cone-fill
     45°) DIPRAKOMPUTASI SEKALI di grid-y bersama → tiap pasangan tinggal lookup+bobot, bukan scan
@@ -237,6 +264,7 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
     ns = [n for n in names if n in tables]
     if target is None:
         target = _flat_target(font, upm, step, slope)
+    strength = strength_of(mode)
     out = {}
     for L in ns:
         Ltab, Lb = tables[L]
@@ -244,7 +272,8 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
         for R in ns:
             Rtab, Rb = tables[R]
             op, min_real = _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step)
-            k = _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac)
+            k = _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac,
+                                    strength)
             if k:
                 out[(L, R)] = k
     return out
@@ -252,7 +281,7 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
 
 def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
                   deadband=None, step=10, samples=10, slope=1.0,
-                  clamp_frac=0.15, safe_frac=0.20):
+                  clamp_frac=0.15, safe_frac=0.20, mode=None):
     """Hitung & tulis SEED kerning class-level ke `font` (dipakai saat impor). Grouping per bentuk
     sisi; nilai per pasangan-kelas memakai model optik v3 yang SAMA dgn Smart Kerning → seed sudah
     seimbang & konsisten dgn hasil tombol Smart. Return dict laporan."""
@@ -303,7 +332,8 @@ def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
                 continue
             Rtab, Rb = margins[Rname]
             op, min_real = _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step)
-            k = _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac)
+            k = _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac,
+                                    strength_of(mode))
             if k:
                 pairs[(g1name, g2name)] = k
 

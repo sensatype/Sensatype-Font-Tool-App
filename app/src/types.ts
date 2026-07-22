@@ -20,6 +20,17 @@ export interface KernPair {
   value: number;
 }
 
+// Kerapatan Smart Kerning. Menskalakan KEKUATAN koreksi optik, bukan target — pasangan LURUS
+// (H|H) tetap 0 di semua mode, jadi spacing yang sudah dirancang tak dilawan; yang berubah hanya
+// seberapa agresif pasangan terbuka/bulat dirapatkan. Untuk merenggangkan SEMUA pasangan secara
+// seragam, pakai scope "Semuanya" (tracking) — itu kontrol yang berbeda.
+export type KernMode = "tight" | "medium" | "loose";
+export const KERN_MODES: { id: KernMode; label: string; hint: string }[] = [
+  { id: "tight",  label: "Dekat",  hint: "Rapatkan lebih agresif (×1,20) — pasangan lurus tetap 0" },
+  { id: "medium", label: "Sedang", hint: "Seimbang (default) — koreksi optik penuh (×1,00)" },
+  { id: "loose",  label: "Jauh",   hint: "Lebih longgar (×0,80) — koreksi optik ditahan" },
+];
+
 // kerning ter-resolusi (level kelas/grup, §9.6)
 export interface KernInfo {
   left: string;

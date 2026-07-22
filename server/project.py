@@ -817,16 +817,17 @@ class Project:
             "pairValue": int(kern[(left, right)]) if (left, right) in kern else None,
         }
 
-    def smart_kern(self, left, right):
+    def smart_kern(self, left, right, mode=None):
         """Saran kern OPTIKAL (sadar-bentuk) untuk satu pasangan — TIDAK menulis apa pun.
         Menghitung dari geometri outline (bentuk lurus/bulat/menjorok/diagonal menyesuaikan).
+        mode = 'tight'/'medium'/'loose' (kerapatan pilihan user; None = sedang).
         Frontend menampilkannya sbg nilai tertahan; ditulis hanya saat user klik Terapkan."""
         font = self._font()
         if left not in font or right not in font:
             raise ValueError(f"Glyph tidak dikenal: {left!r} / {right!r}")
         upm = font.info.unitsPerEm or 1000
-        v = kerning_mod.smart_pair(font, left, right, upm=upm)
-        return {"left": left, "right": right, "value": int(v)}
+        v = kerning_mod.smart_pair(font, left, right, upm=upm, mode=mode)
+        return {"left": left, "right": right, "value": int(v), "mode": kerning_mod.resolve_mode(mode)}
 
     @_locked
     def shift_all_kerning(self, delta, recompile=False):
@@ -860,10 +861,11 @@ class Project:
         return {"cleared": n}
 
     @_locked
-    def auto_kern_all(self, only_empty=True, recompile=True):
+    def auto_kern_all(self, only_empty=True, recompile=True, mode=None):
         """Auto-kern optikal SELURUH pasangan huruf & angka (ASCII, glyph-level).
         only_empty=True (default) → HANYA mengisi pasangan yang belum punya kerning apa pun
-        (glyph maupun lewat grup) → kerning manual/kelas yang sudah ada TIDAK ditimpa (aman)."""
+        (glyph maupun lewat grup) → kerning manual/kelas yang sudah ada TIDAK ditimpa (aman).
+        mode = 'tight'/'medium'/'loose' (kerapatan pilihan user; None = sedang)."""
         font = self._font()
         upm = font.info.unitsPerEm or 1000
         # Kandidat dibatasi ke huruf & angka ASCII (A–Z a–z 0–9) agar tak meledak (n²).
@@ -875,7 +877,7 @@ class Project:
             u = font[n].unicode
             if u and (0x41 <= u <= 0x5A or 0x61 <= u <= 0x7A or 0x30 <= u <= 0x39):
                 names.append(n)
-        pairs = kerning_mod.auto_kern_pairs(font, names, upm=upm)
+        pairs = kerning_mod.auto_kern_pairs(font, names, upm=upm, mode=mode)
         g1, g2 = self._kern_groups(font)
         written = skipped = 0
         done = set()
@@ -915,7 +917,8 @@ class Project:
             font.save(self.ufo_path, overwrite=True)
             if recompile:
                 self.compile_static()
-        return {"candidates": len(names), "computed": len(pairs), "written": written, "skipped": skipped}
+        return {"candidates": len(names), "computed": len(pairs), "written": written,
+                "skipped": skipped, "mode": kerning_mod.resolve_mode(mode)}
 
     @_locked
     def expand_kern_groups(self):

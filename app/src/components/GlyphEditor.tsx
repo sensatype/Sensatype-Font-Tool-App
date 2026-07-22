@@ -6,7 +6,8 @@ import { Move, Spline, Square, Circle, Trash2, ZoomIn, ZoomOut, Maximize, Undo2,
 import { api } from "../api";
 import { commandFor, comboFromEvent, type CmdContext } from "../keymap";
 import { contoursToPath, addNode, removeNode, segClosest } from "../outline";
-import type { Anchor, ContourPoint, Glyph, GlyphComponent, GlyphDetail, GlyphRender, KernInfo } from "../types";
+import type { Anchor, ContourPoint, Glyph, GlyphComponent, GlyphDetail, GlyphRender, KernInfo, KernMode } from "../types";
+import { KERN_MODES } from "../types";
 
 const ANCHOR_COLOR = "#e8a13a"; // warna penanda anchor (amber)
 const COMP_COLOR = "#4aa3df";   // warna komponen (biru)
@@ -125,6 +126,12 @@ export function GlyphEditor({
   const [kernInfo, setKernInfo] = useState<KernInfo | null>(null); // hasil resolusi (grup/exception)
   const [kernScope, setKernScope] = useState<"all" | "class" | "pair" | "smart">("class"); // Semuanya(tracking)/Kelas/Pasangan/Smart
   const [smartBusy, setSmartBusy] = useState(false); // sedang menghitung saran smart kern
+  // Kerapatan Smart Kerning (dekat/sedang/jauh) — tersimpan per-perangkat, sama spt keymap.
+  const [kernMode, setKernMode] = useState<KernMode>(() => {
+    const v = localStorage.getItem("ge.kernMode");
+    return v === "tight" || v === "loose" ? v : "medium";
+  });
+  const kernModeRef = useRef(kernMode); // dibaca computeSmart tanpa memicu ulang effect
   const [autoBusy, setAutoBusy] = useState(false); // sedang menjalankan auto-kern seluruh font
   const [autoMenu, setAutoMenu] = useState(false); // menu pilihan auto-kern (isi kosong / timpa semua)
   const [fitBusy, setFitBusy] = useState(false); // sedang merapatkan SEMUA glyph ke ink
@@ -299,7 +306,8 @@ export function GlyphEditor({
     if (!kernLeft || !kernRight || !glyphNames.includes(kernLeft) || !glyphNames.includes(kernRight)) return;
     setSmartBusy(true);
     try {
-      const [r, k] = await Promise.all([api.smartKern(kernLeft, kernRight), api.getKerning(kernLeft, kernRight)]);
+      const [r, k] = await Promise.all([api.smartKern(kernLeft, kernRight, kernModeRef.current),
+                                        api.getKerning(kernLeft, kernRight)]);
       setKernInfo(k); kernInfoRef.current = k;
       setKernVal(r.value);
       const dirty = r.value !== (k.classValue ?? 0);
@@ -312,18 +320,28 @@ export function GlyphEditor({
     if (smartSkipRef.current) { smartSkipRef.current = false; return; } // bump fontV dari apply kita sendiri → jangan timpa nilai yang baru diterapkan dgn saran baru
     computeSmart();
   }, [kernScope, mode, computeSmart, fontV]);
+  // Ganti kerapatan → hitung ulang SEGERA, termasuk saat nilai masih tertahan (dirty): user memang
+  // sedang meminta saran yang berbeda, jadi guard "jangan timpa" di effect di atas tak berlaku.
+  const pickKernMode = useCallback((m: KernMode) => {
+    if (m === kernModeRef.current) return;
+    kernModeRef.current = m;
+    setKernMode(m);
+    try { localStorage.setItem("ge.kernMode", m); } catch { /* storage penuh — abaikan */ }
+    computeSmart();
+  }, [computeSmart]);
   // AUTO-KERN SELURUH FONT: hitung + terapkan kern optikal utk semua pasangan huruf/angka.
   // Dua mode (pilihan user): onlyEmpty=true → hanya MENGISI yang belum diatur (aman);
   // onlyEmpty=false → TIMPA SEMUA (termasuk yang sudah diatur manual).
   async function runAutoKernAll(onlyEmpty: boolean) {
     if (autoBusy) return;
+    const modeLabel = KERN_MODES.find((m) => m.id === kernMode)?.label ?? "Sedang";
     const msg = onlyEmpty
-      ? "Auto-kern optikal pasangan huruf & angka?\n\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah. Bisa memakan beberapa detik."
-      : "Auto-kern optikal SEMUA pasangan huruf & angka?\n\n⚠️ Nilai kerning yang sudah Anda atur akan DITIMPA hasil hitung optikal. Bisa memakan beberapa detik.";
+      ? `Auto-kern optikal pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah. Bisa memakan beberapa detik.`
+      : `Auto-kern optikal SEMUA pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.\n⚠️ Nilai kerning yang sudah Anda atur akan DITIMPA hasil hitung optikal. Bisa memakan beberapa detik.`;
     if (!confirm(msg)) return;
     setAutoBusy(true);
     try {
-      const r = await serial(() => api.autoKernAll(onlyEmpty));
+      const r = await serial(() => api.autoKernAll(onlyEmpty, kernMode));
       onKern?.(); // bump editV → panel & webfont menyusul
       alert(`Auto-kern selesai:\n${r.written} pasangan ditulis · ${r.skipped} dilewati\ndari ${r.candidates} glyph huruf/angka.`);
     } catch (e) {
@@ -1776,6 +1794,21 @@ export function GlyphEditor({
                 </button>
               </div>
             )}
+            {/* Kerapatan: menskalakan KEKUATAN koreksi optik. Pasangan lurus (H|H) tetap 0 di semua
+                mode — untuk merenggangkan semua pasangan seragam, pakai scope "Semuanya". */}
+            {kernScope === "smart" && (
+              <div className="flex gap-0.5 p-0.5 rounded-lg shrink-0" style={{ background: "var(--bg-2)" }}
+                   title="Kerapatan saran Smart — hanya mengubah seberapa agresif pasangan terbuka/bulat dirapatkan. Pasangan lurus tetap 0.">
+                {KERN_MODES.map((m) => (
+                  <button key={m.id} className="text-xs px-2 py-1 rounded-md font-medium" title={m.hint}
+                    onClick={() => pickKernMode(m.id)} disabled={smartBusy}
+                    style={{ background: kernMode === m.id ? "var(--accent)" : "transparent",
+                             color: kernMode === m.id ? "#fff" : "var(--muted)" }}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {kernScope === "smart" && (
               <button className="btn !py-1.5" onClick={computeSmart} disabled={smartBusy}
                 title="Hitung ulang saran Smart (kern optikal dari bentuk outline) untuk pasangan ini">
@@ -1820,7 +1853,7 @@ export function GlyphEditor({
                   ? "Saran Smart siap — klik Terapkan (disimpan level kelas), atau ✕ batal"
                   : "Nilai belum ditetapkan — klik Terapkan untuk menyimpan, atau ✕ untuk batal")
                 : kernScope === "smart"
-                ? "Smart = kern optikal dari bentuk outline (lurus/bulat/menjorok/diagonal menyesuaikan). Pilih pasangan → saran muncul."
+                ? `Smart = kern optikal dari bentuk outline · kerapatan ${(KERN_MODES.find((m) => m.id === kernMode)?.label ?? "Sedang").toLowerCase()}. Pilih pasangan → saran muncul.`
                 : kernScope === "all"
                 ? "Spasi global → jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning · persisten & ikut export"
                 : kernScope === "class"

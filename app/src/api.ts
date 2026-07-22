@@ -1,4 +1,4 @@
-import type { ContourPoint, GlyphDetail, GlyphRender, KernInfo, KernListEntry, KernPair, ProjectState, StagingState } from "./types";
+import type { ContourPoint, GlyphDetail, GlyphRender, KernInfo, KernListEntry, KernMode, KernPair, ProjectState, StagingState } from "./types";
 
 const BASE = "/api";
 
@@ -148,9 +148,10 @@ export const api = {
       .then(j<{ pairs: KernListEntry[]; total: number; matched: number }>),
 
   // Smart kern: saran kern optikal (sadar-bentuk) utk satu pasangan — read-only.
-  smartKern: (left: string, right: string) =>
-    fetch(`${BASE}/kerning/smart?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`)
-      .then(j<{ left: string; right: string; value: number }>),
+  // mode = kerapatan pilihan user (dekat/sedang/jauh); pasangan LURUS tetap 0 di semua mode.
+  smartKern: (left: string, right: string, mode: KernMode = "medium") =>
+    fetch(`${BASE}/kerning/smart?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}&mode=${mode}`)
+      .then(j<{ left: string; right: string; value: number; mode: KernMode }>),
 
   // Geser SEMUA nilai kerning tersimpan sebesar delta (bake permanen — scope "Semuanya").
   shiftAllKern: (delta: number) =>
@@ -164,11 +165,11 @@ export const api = {
     .then(j<{ cleared: number }>),
 
   // Auto-kern optikal SELURUH pasangan huruf & angka. onlyEmpty → tak menimpa yang sudah ada.
-  autoKernAll: (onlyEmpty = true) =>
+  autoKernAll: (onlyEmpty = true, mode: KernMode = "medium") =>
     fetch(`${BASE}/kerning/auto`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ onlyEmpty, recompile: false }),
-    }).then(j<{ candidates: number; computed: number; written: number; skipped: number }>),
+      body: JSON.stringify({ onlyEmpty, recompile: false, mode }),
+    }).then(j<{ candidates: number; computed: number; written: number; skipped: number; mode: KernMode }>),
 
   setKerning: (body: { left: string; right: string; value: number; scope?: "class" | "pair"; recompile?: boolean }) =>
     fetch(`${BASE}/kerning`, {
