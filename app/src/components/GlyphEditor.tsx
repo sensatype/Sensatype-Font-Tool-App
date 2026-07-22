@@ -405,13 +405,31 @@ export function GlyphEditor({
         } else if (r.learnedFrom === 1) {
           belajar = `\n\n✓ Mengikuti selera Anda: ${pct > 0 ? "+" : ""}${pct}% dari saran sistem (dipelajari dari 1 pasangan).\n`
             + `${r.preserved} pasangan yang Anda tetapkan dipertahankan. Setel beberapa pasangan lagi agar penyesuaiannya makin tepat.`;
+        } else if (r.learnedConflict > 0) {
+          // Kustomnya BERLAWANAN arah dgn saran (mis. sistem merapatkan, Anda merenggangkan) →
+          // itu koreksi khas pasangan, bukan selera umum. Katakan terus terang, jangan mengarang.
+          belajar = `\n\n${r.learnedConflict} pasangan yang Anda tetapkan BERLAWANAN ARAH dengan saran sistem `
+            + "(sistem ingin merapatkan, Anda merenggangkan — atau sebaliknya).\n"
+            + "Itu koreksi khusus untuk pasangan itu sendiri, bukan selera yang bisa disalurkan ke pasangan lain, "
+            + "jadi pasangan lain memakai saran sistem.\n\n"
+            + "Agar tersalur: setel beberapa pasangan ke ARAH YANG SAMA dengan saran (mis. sama-sama lebih rapat), "
+            + "lalu jalankan ini lagi. Nilai khusus Anda tetap dipertahankan.";
         } else {
           belajar = "\n\nTidak ada pasangan yang Anda tetapkan, jadi dipakai saran sistem apa adanya.\n"
             + "Agar sistem mengikuti selera Anda: atur beberapa pasangan → klik Terapkan → jalankan ini lagi.";
         }
       }
+      // Spacing datar = akar masalah "tak ada yang bergerak": tanpa sidebearing, kerning mentok
+      // batas di hampir semua pasangan. Sebutkan remedinya, jangan biarkan pengguna menebak.
+      const spasi = r.spacingFlat
+        ? "\n\n⚠️ Spacing font ini masih ~0 (semua glyph menempel rata ke advance-nya).\n"
+          + "Kerning jadi dipaksa menambal pekerjaan spacing, sehingga hampir semua pasangan mentok "
+          + "batas dan penyesuaian nyaris tak terlihat.\n"
+          + "Jalankan \"Re-seed\" dulu untuk memberi jarak dasar — setelah itu auto-kern & selera Anda "
+          + "baru punya ruang bergerak."
+        : "";
       alert(`Auto-kern selesai:\n${r.written} pasangan ditulis · ${r.skipped} dilewati\n`
-        + `dari ${r.candidates} glyph huruf/angka.${belajar}`);
+        + `dari ${r.candidates} glyph huruf/angka.${belajar}${spasi}`);
     } catch (e) {
       alert("Auto-kern gagal: " + ((e as Error).message || e));
     } finally {

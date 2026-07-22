@@ -827,7 +827,7 @@ class Project:
         seluruh font. Return (pengali, jumlah pasangan yang benar-benar dipakai)."""
         tgt = kerning_mod.flat_target(font, upm)
         g1, g2 = self._kern_groups(font)
-        ratios = []
+        ratios, conflict = [], 0
         for key in custom:
             parts = key.split(" ")
             if len(parts) != 2:
@@ -841,14 +841,23 @@ class Project:
             userv = self._resolve_kern(font, g1, g2, l, r)
             if userv == 0:
                 continue
-            ratios.append(userv / sysv)
+            ratio = userv / sysv
+            if ratio <= 0:
+                # ARAH BERLAWANAN (mis. sistem merapatkan −31, pengguna merenggangkan +395):
+                # rasio negatif BUKAN "selera" proporsional — itu koreksi KHUSUS pasangan itu
+                # (mis. '!' memang butuh ruang sebelum 'o'). Dulu nilai ini lolos lalu di-clamp
+                # jadi 0,5 → seluruh font diam-diam dilonggarkan setengah. Sekarang ditolak,
+                # dan UI menjelaskan kenapa tak ada yang disalurkan.
+                conflict += 1
+                continue
+            ratios.append(ratio)
         # SATU contoh pun dipakai: kalau pengguna sudah repot menyetel sebuah pasangan lalu memilih
         # "Timpa semua", niatnya jelas — menuntut contoh kedua membuat sistem terasa keras kepala.
         # Risiko ekstrapolasi dari sedikit contoh dibatasi clamp 0,5–2,0, dan UI menyebut dari
         # berapa pasangan ia belajar supaya pengguna bisa menilai sendiri.
         if not ratios:
-            return 1.0, 0
-        return max(0.5, min(2.0, statistics.median(ratios))), len(ratios)
+            return 1.0, 0, conflict
+        return max(0.5, min(2.0, statistics.median(ratios))), len(ratios), conflict
 
     def custom_kern_pairs(self):
         """Pasangan yang nilainya DITETAPKAN pengguna (read-only) — dipakai UI agar "Timpa semua"
@@ -955,9 +964,16 @@ class Project:
                 custom_keys.add((g1.get(p[0]) or p[0], g2.get(p[1]) or p[1]))
         # TIMPA SEMUA: pelajari selera pengguna dari kustomisasinya, lalu terapkan ke pasangan LAIN.
         # (mode "isi yang kosong" tak menyentuh nilai lama → tak ada yang perlu diselaraskan)
-        scale, learned_from = 1.0, 0
+        scale, learned_from, conflict = 1.0, 0, 0
         if not only_empty and custom:
-            scale, learned_from = self._learn_strength(font, upm, mode, custom)
+            scale, learned_from, conflict = self._learn_strength(font, upm, mode, custom)
+        # SPACING DATAR: rhythm acuan jauh di bawah normal (~0,15 em) berarti sidebearing ~0 —
+        # keadaan bawaan sesudah impor (fit_ink: LSB=RSB=0). Kerning lalu dipaksa menambal
+        # pekerjaan spacing: hampir semua pasangan mentok clamp/lantai, sehingga selera pengguna
+        # tak punya ruang bergerak (terukur: geseran 2-3 unit; sesudah Re-seed jadi 30-51 unit).
+        # Dilaporkan agar UI bisa menyarankan Re-seed, bukan membiarkan pengguna menebak.
+        flat = kerning_mod.flat_target(font, upm)
+        spacing_flat = flat < 0.08 * upm
         pairs = kerning_mod.auto_kern_pairs(font, names, upm=upm, mode=mode, strength_scale=scale)
         written = skipped = preserved = 0
         done = set()
@@ -1003,7 +1019,11 @@ class Project:
         return {"candidates": len(names), "computed": len(pairs), "written": written,
                 "skipped": skipped, "preserved": preserved, "mode": kerning_mod.resolve_mode(mode),
                 # apa yang DIPELAJARI dari kustomisasi pengguna (1.0 = tak ada / belum cukup contoh)
-                "learnedScale": round(scale, 3), "learnedFrom": learned_from}
+                "learnedScale": round(scale, 3), "learnedFrom": learned_from,
+                # kustom yang ARAHNYA berlawanan dgn saran → koreksi khas pasangan, tak bisa disalurkan
+                "learnedConflict": conflict,
+                # spacing font ~0 → kerning mentok batas & selera tak tersalur (sarankan Re-seed)
+                "spacingFlat": bool(spacing_flat), "flatTarget": round(flat)}
 
     @_locked
     def expand_kern_groups(self):

@@ -173,7 +173,8 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ onlyEmpty, recompile: false, mode }),
     }).then(j<{ candidates: number; computed: number; written: number; skipped: number;
-                preserved: number; mode: KernMode; learnedScale: number; learnedFrom: number }>),
+                preserved: number; mode: KernMode; learnedScale: number; learnedFrom: number;
+                learnedConflict: number; spacingFlat: boolean; flatTarget: number }>),
 
   setKerning: (body: { left: string; right: string; value: number; scope?: "class" | "pair"; recompile?: boolean }) =>
     fetch(`${BASE}/kerning`, {
