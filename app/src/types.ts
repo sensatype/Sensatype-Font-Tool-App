@@ -127,6 +127,18 @@ export interface StagedGuide {
   linked?: boolean; // false = garis lepas dari grup se-tipe (gerak sendiri)
 }
 
+// Apa yang ikut bergerak saat sebuah garis panduan diseret (langkah 2 impor).
+// Preferensi tampilan saja — TIDAK ikut tersimpan ke staging; yang disimpan hanya y & type.
+export type GuideMode = "type" | "pair" | "single";
+export const GUIDE_MODES: { id: GuideMode; label: string; hint: string }[] = [
+  { id: "type", label: "Se-warna",
+    hint: "Semua garis sewarna ikut bergerak (biru↔biru, merah↔merah) — jarak antar-baris tetap. Cocok utk menggeser seluruh lembar sekaligus." },
+  { id: "pair", label: "Pasangan",
+    hint: "Hanya cap & baseline BARIS ITU yang bergerak, jaraknya terkunci → baris naik/turun utuh tanpa mengubah skalanya. Pasangan ditentukan dari posisi (cap + baseline terdekat di bawahnya), sama seperti saat impor memasangkannya." },
+  { id: "single", label: "Lepas",
+    hint: "Hanya garis yang Anda seret. Dipakai utk mengubah tinggi cap satu baris (jarak cap↔base berubah → skala baris itu ikut berubah)." },
+];
+
 export interface StagingState {
   shapes: StagedShape[];
   guides: StagedGuide[];

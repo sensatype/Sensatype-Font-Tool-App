@@ -5,7 +5,8 @@ import { SpecimenCanvas } from "./SpecimenCanvas";
 import { AccountChip } from "./AccountChip";
 import { commandFor, comboFromEvent, bindingOf, formatCombo, useKeymapVersion } from "../keymap";
 import logo from "../assets/logo.svg";
-import type { ProjectState, StagedShape, StagingState } from "../types";
+import { GUIDE_MODES } from "../types";
+import type { GuideMode, ProjectState, StagedShape, StagingState } from "../types";
 
 type Step = "upload" | "clean" | "map";
 
@@ -30,6 +31,12 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
   // toolbar langkah 2 (samping "Pisah"), bukan di kanvas. Default AKTIF, diingat antar-sesi.
   const [snapOn, setSnapOn] = useState(() => localStorage.getItem("sc.snap") !== "0");
   useEffect(() => { localStorage.setItem("sc.snap", snapOn ? "1" : "0"); }, [snapOn]);
+  // Apa yang ikut bergerak saat garis diseret. Default "type" = perilaku lama (se-warna).
+  const [guideMode, setGuideMode] = useState<GuideMode>(() => {
+    const v = localStorage.getItem("sc.guideMode");
+    return v === "pair" || v === "single" ? v : "type";
+  });
+  useEffect(() => { localStorage.setItem("sc.guideMode", guideMode); }, [guideMode]);
 
   const kept = useMemo(() => (staging?.shapes ?? []).filter((s) => !s.excluded), [staging]);
 
@@ -217,6 +224,20 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
             <Magnet className="size-4" />Magnet
           </button>
           <div className="h-5 w-px mx-1" style={{ background: "var(--border-2)" }} />
+          {/* Apa yang ikut bergerak saat garis diseret. "Pasangan" mengunci jarak cap↔base satu
+              baris → baris naik/turun utuh tanpa mengubah skalanya. */}
+          <div className="flex gap-0.5 p-0.5 rounded-lg shrink-0" style={{ background: "var(--bg-2)" }}
+               title="Saat garis panduan diseret, apa saja yang ikut bergerak">
+            {GUIDE_MODES.map((m) => (
+              <button key={m.id} className="text-xs px-2 py-1 rounded-md font-medium" title={m.hint}
+                onClick={() => setGuideMode(m.id)}
+                style={{ background: guideMode === m.id ? "var(--accent)" : "transparent",
+                         color: guideMode === m.id ? "#fff" : "var(--muted)" }}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <div className="h-5 w-px mx-1" style={{ background: "var(--border-2)" }} />
           <button className="btn !py-1.5" onClick={() => addGuide("baseline")}><span style={{ color: "#ff5b6e" }}>―</span> Baseline</button>
           <button className="btn !py-1.5" onClick={() => addGuide("cap")}><span style={{ color: "#5b9cff" }}>―</span> Cap</button>
           <div className="h-5 w-px mx-1" style={{ background: "var(--border-2)" }} />
@@ -232,6 +253,7 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
             onGuides={commitGuides}
             onMoveShapes={moveShapes}
             snapOn={snapOn}
+            guideMode={guideMode}
           />
         )}
         {err && <div className="px-4 py-2 text-bad text-sm">{err}</div>}

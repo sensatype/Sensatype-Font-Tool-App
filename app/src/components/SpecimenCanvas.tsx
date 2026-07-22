@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MagnifyingGlassPlus, MagnifyingGlassMinus, CornersOut } from "@phosphor-icons/react";
-import type { StagedGuide, StagingState } from "../types";
+import type { GuideMode, StagedGuide, StagingState } from "../types";
 
 const MIN_Z = 0.25, MAX_Z = 10; // 25%–1000%
 const SNAP_PX = 7;              // jarak tarik magnet (piksel layar)
@@ -44,6 +44,7 @@ export function SpecimenCanvas({
   onGuides,
   onMoveShapes,
   snapOn,
+  guideMode,
 }: {
   staging: StagingState;
   sel: Set<number>;
@@ -51,6 +52,7 @@ export function SpecimenCanvas({
   onGuides: (guides: { y: number; type: string; linked?: boolean }[]) => void;
   onMoveShapes: (ids: number[], dx: number, dy: number) => void;
   snapOn: boolean; // magnet garis — tombolnya di toolbar wizard (samping "Pisah"), state di ImportWizard
+  guideMode: GuideMode; // apa yang ikut bergerak saat garis diseret — tombolnya juga di toolbar wizard
 }) {
   const [vx, vy, vw, vh] = staging.viewBox;
   const [guides, setGuides] = useState<StagedGuide[]>(staging.guides);
@@ -218,6 +220,25 @@ export function SpecimenCanvas({
   }
 
   // ---------- garis (baseline/cap) ----------
+  // Pasangan satu BARIS = cap + baseline terdekat DI BAWAHNYA (Y-down). Sengaja ditentukan dari
+  // POSISI, bukan urutan array: itu persis cara commit memasangkannya (project.py — "baseline
+  // terdekat ke dasar glyph, cap terdekat di atasnya"), jadi yang terlihat di kanvas dijamin sama
+  // dgn yang dipakai saat impor — dan tetap benar setelah garis ditambah/dihapus/disalin.
+  function pairIds(all: StagedGuide[], g: StagedGuide): number[] {
+    const caps = all.filter((x) => x.type === "cap");
+    const bases = all.filter((x) => x.type !== "cap");
+    const near = (list: StagedGuide[], y: number) =>
+      list.reduce((a, c) => (Math.abs(c.y - y) < Math.abs(a.y - y) ? c : a));
+    if (g.type === "cap") {
+      if (!bases.length) return [g.id];
+      const below = bases.filter((b) => b.y >= g.y);
+      return [g.id, near(below.length ? below : bases, g.y).id];
+    }
+    if (!caps.length) return [g.id];
+    const above = caps.filter((c) => c.y <= g.y);
+    return [near(above.length ? above : caps, g.y).id, g.id];
+  }
+
   function onGuideDown(g: StagedGuide, e: React.PointerEvent) {
     e.stopPropagation();
     dragKind.current = "guide";
@@ -229,12 +250,13 @@ export function SpecimenCanvas({
     // SET yang digerakkan (prioritas):
     //  - pilihan EKSPLISIT >1 garis (Shift-multiselect) → pilihan itu
     //    (klik tunggal hanya menyorot utk tombol putus; TIDAK memutus grup gerak)
-    //  - jika garis TERHUBUNG → semua garis SE-TIPE yang terhubung ikut bergerak
-    //    (baseline↔baseline, cap↔cap; baseline & cap TIDAK saling tarik)
-    //  - jika garis LEPAS (linked=false) → garis itu saja
+    //  - garis ber-tanda LEPAS (linked=false) → garis itu saja (pengecualian per-garis,
+    //    menang atas mode toolbar supaya penandaan manual tak diam-diam diabaikan)
+    //  - selain itu ikut MODE toolbar: se-warna / pasangan (satu baris) / lepas
     let ids = (selGRef.current.size > 1 && selGRef.current.has(g.id))
       ? [...selGRef.current]
-      : (g.linked === false ? [g.id]
+      : (g.linked === false || guideMode === "single" ? [g.id]
+        : guideMode === "pair" ? pairIds(guidesRef.current, g)
         : guidesRef.current.filter((x) => x.type === g.type && x.linked !== false).map((x) => x.id));
     if (e.altKey) {
       let nid = Math.max(0, ...guidesRef.current.map((x) => x.id)) + 1;
