@@ -444,6 +444,12 @@ def kern_list(q: str | None = None, limit: int = 400):
     return project.kern_list(q=q, limit=min(max(limit, 1), 2000))
 
 
+@app.get("/api/kerning/custom")
+def kern_custom():
+    """Berapa pasangan yang sudah ditetapkan pengguna (acuan belajar "Timpa semua") — read-only."""
+    return project.custom_kern_pairs()
+
+
 @app.get("/api/kerning/smart")
 def kern_smart(left: str, right: str, mode: str | None = None):
     """Saran kern optikal (sadar-bentuk) utk satu pasangan — read-only, tak menulis.

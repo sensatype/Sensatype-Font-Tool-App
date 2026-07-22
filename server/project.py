@@ -846,6 +846,13 @@ class Project:
             return 1.0, len(ratios)
         return max(0.5, min(2.0, statistics.median(ratios))), len(ratios)
 
+    def custom_kern_pairs(self):
+        """Pasangan yang nilainya DITETAPKAN pengguna (read-only) — dipakai UI agar "Timpa semua"
+        tidak jadi kotak hitam: pengguna tahu SEBELUM menjalankan apakah ada selera yang bisa
+        dipelajari, dan berapa banyak."""
+        keys = sorted(self._custom_keys(self._font()))
+        return {"count": len(keys), "pairs": keys[:50]}
+
     def get_kern(self, left, right):
         font = self._font()
         g1, g2 = self._kern_groups(font)

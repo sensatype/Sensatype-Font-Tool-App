@@ -347,9 +347,24 @@ export function GlyphEditor({
   async function runAutoKernAll(onlyEmpty: boolean) {
     if (autoBusy) return;
     const modeLabel = KERN_MODES.find((m) => m.id === kernMode)?.label ?? "Sedang";
+    // Beri tahu SEBELUM jalan: berapa pasangan kustom yang tercatat & apa akibatnya. Tanpa ini
+    // "Timpa semua" jadi kotak hitam — pengguna mengira sistem mengabaikan seleranya, padahal
+    // memang belum ada kustomisasi yang TERSIMPAN (menggeser saja tak cukup; harus Terapkan).
+    let custom = 0;
+    try { custom = (await api.customKerns()).count; } catch { /* biarkan 0 */ }
+    const belajar = !onlyEmpty
+      ? custom >= 2
+        ? `\n\nSistem akan MENGIKUTI SELERA ANDA dari ${custom} pasangan yang Anda tetapkan — pasangan itu dipertahankan, sisanya menyesuaikan.`
+        : custom === 1
+          ? "\n\nBaru 1 pasangan yang Anda tetapkan — belum cukup untuk menyimpulkan selera, jadi hasilnya memakai saran sistem apa adanya. Tetapkan minimal 2 pasangan (atur nilainya lalu klik Terapkan) agar sistem mengikuti selera Anda."
+          : "\n\nBelum ada pasangan yang Anda tetapkan, jadi hasilnya memakai saran sistem apa adanya.\nAgar sistem mengikuti selera Anda: atur beberapa pasangan → klik Terapkan → baru jalankan ini."
+      : "";
+    const pending = kernDirty
+      ? "\n\n⚠️ Ada nilai yang belum Anda Terapkan — nilai itu TIDAK ikut diperhitungkan."
+      : "";
     const msg = onlyEmpty
-      ? `Auto-kern optikal pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah. Bisa memakan beberapa detik.`
-      : `Auto-kern optikal SEMUA pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.\n⚠️ Nilai kerning yang sudah Anda atur akan DITIMPA hasil hitung optikal. Bisa memakan beberapa detik.`;
+      ? `Auto-kern optikal pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah. Bisa memakan beberapa detik.${pending}`
+      : `Auto-kern optikal SEMUA pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.\n⚠️ Kerning yang belum Anda tetapkan akan DITIMPA hasil hitung optikal.${belajar}${pending}\n\nBisa memakan beberapa detik.`;
     if (!confirm(msg)) return;
     setAutoBusy(true);
     try {
@@ -357,14 +372,24 @@ export function GlyphEditor({
       onKern?.(); // bump editV → panel & webfont menyusul
       // Laporkan apa yang DIPELAJARI dari kustomisasi — supaya jelas hasilnya mengikuti selera
       // pengguna, bukan diam-diam kembali ke rekomendasi sistem.
+      // SELALU laporkan hasil belajarnya — termasuk saat TIDAK belajar, beserta alasannya.
+      // Diam adalah masalahnya: pengguna tak bisa membedakan "tak ada yang dipelajari" dari "rusak".
       const pct = Math.round((r.learnedScale - 1) * 100);
-      const belajar = r.learnedFrom >= 2 && pct !== 0
-        ? `\n\nMengikuti selera Anda: ${pct > 0 ? "+" : ""}${pct}% dari saran sistem `
-          + `(dipelajari dari ${r.learnedFrom} pasangan yang Anda kustom).\n`
-          + `${r.preserved} pasangan kustom Anda dipertahankan apa adanya.`
-        : r.learnedFrom === 1
-          ? "\n\nBaru 1 pasangan kustom — belum cukup untuk menyimpulkan selera, jadi dipakai saran sistem apa adanya."
-          : "";
+      let belajar = "";
+      if (!onlyEmpty) {
+        if (r.learnedFrom >= 2 && pct !== 0) {
+          belajar = `\n\n✓ Mengikuti selera Anda: ${pct > 0 ? "+" : ""}${pct}% dari saran sistem `
+            + `(dipelajari dari ${r.learnedFrom} pasangan).\n`
+            + `${r.preserved} pasangan yang Anda tetapkan dipertahankan apa adanya.`;
+        } else if (r.learnedFrom >= 2) {
+          belajar = `\n\nNilai Anda ternyata ~sama dengan saran sistem (dipelajari dari ${r.learnedFrom} pasangan), jadi tak ada penyesuaian.`;
+        } else if (r.learnedFrom === 1) {
+          belajar = "\n\nBaru 1 pasangan yang Anda tetapkan — belum cukup untuk menyimpulkan selera. Tetapkan minimal 2, lalu jalankan lagi.";
+        } else {
+          belajar = "\n\nTidak ada pasangan yang Anda tetapkan, jadi dipakai saran sistem apa adanya.\n"
+            + "Agar sistem mengikuti selera Anda: atur beberapa pasangan → klik Terapkan → jalankan ini lagi.";
+        }
+      }
       alert(`Auto-kern selesai:\n${r.written} pasangan ditulis · ${r.skipped} dilewati\n`
         + `dari ${r.candidates} glyph huruf/angka.${belajar}`);
     } catch (e) {

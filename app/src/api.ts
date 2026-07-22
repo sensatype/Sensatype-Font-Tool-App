@@ -147,6 +147,9 @@ export const api = {
     fetch(`${BASE}/kerning/list?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ""}`)
       .then(j<{ pairs: KernListEntry[]; total: number; matched: number }>),
 
+  // Berapa pasangan yang sudah DITETAPKAN pengguna — acuan belajar "Timpa semua". Read-only.
+  customKerns: () => fetch(`${BASE}/kerning/custom`).then(j<{ count: number; pairs: string[] }>),
+
   // Smart kern: saran kern optikal (sadar-bentuk) utk satu pasangan — read-only.
   // mode = kerapatan pilihan user (dekat/sedang/jauh); pasangan LURUS tetap 0 di semua mode.
   smartKern: (left: string, right: string, mode: KernMode = "medium") =>

@@ -274,6 +274,15 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
     # strength_scale = SELERA pengguna yang dipelajari (rasio nilai yang dia tetapkan thd saran
     # sistem). Menskalakan KEKUATAN koreksi, bukan menambah offset → pasangan lurus tetap 0.
     strength = strength_of(mode) * strength_scale
+    # BATAS ikut mengalah saat pengguna minta lebih rapat (scale>1). Tanpa ini seleranya tak
+    # tersalur: pada font berspasi rapat, LANTAI anti-tabrakan mengikat hampir semua pasangan
+    # (terukur 88% tak bergerak saat kekuatan 1,0→1,3) sehingga "Timpa semua" terlihat diam.
+    # Pengguna sudah MEMBUKTIKAN menerima jarak lebih rapat — nilai yang dia tetapkan sendiri
+    # melampaui batas sistem. Lantai tetap punya dasar mutlak (0,08×target ≈ 1,2% em) agar
+    # glyph tak pernah benar-benar bertabrakan.
+    if strength_scale > 1.0:
+        clamp_frac = clamp_frac * strength_scale
+        safe_frac = max(0.08, safe_frac / strength_scale)
     out = {}
     for L in ns:
         Ltab, Lb = tables[L]
