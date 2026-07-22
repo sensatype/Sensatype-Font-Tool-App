@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, Plus, Trash, CircleNotch, TextT, Pencil, Gear } from "@phosphor-icons/react";
+import { FolderOpen, Plus, Trash, CircleNotch, Pencil, Gear } from "@phosphor-icons/react";
 import { api, type ProjectSummary } from "../api";
 import { AccountChip } from "./AccountChip";
 import { useSettings } from "./Settings";
@@ -12,6 +12,33 @@ function rel(ts: number): string {
   const h = Math.floor(m / 60); if (h < 24) return `${h} jam lalu`;
   const d = Math.floor(h / 24); if (d < 30) return `${d} hari lalu`;
   return new Date(ts).toLocaleDateString();
+}
+
+// Muat webfont pratinjau SATU project sbg @font-face ber-nama unik → kartunya tampil dalam huruf
+// project itu sendiri (ini alat desain font; kartu generik membuang informasi paling berguna).
+// Project yang belum pernah dikompilasi tak punya preview.woff2 → 404 itu NORMAL, bukan error:
+// kartu jatuh ke huruf UI. Family dilepas saat unmount agar tak menumpuk di document.fonts.
+function useProjectFont(id: string, version: number): string | null {
+  const [family, setFamily] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    let added: FontFace | null = null;
+    const fam = `SensaProj-${id}-${version}`;
+    new FontFace(fam, `url(${api.projectPreviewUrl(id, version)})`)
+      .load()
+      .then((f) => {
+        if (!alive) return;
+        document.fonts.add(f);
+        added = f;
+        setFamily(fam);
+      })
+      .catch(() => { /* belum ada preview → biarkan fallback huruf UI */ });
+    return () => {
+      alive = false;
+      if (added) document.fonts.delete(added);
+    };
+  }, [id, version]);
+  return family;
 }
 
 // Modal ringan TANPA scrim/peredup — backdrop transparan (area di luar TIDAK berubah warna, hanya
@@ -31,6 +58,70 @@ function Modal({ onClose, children }: { onClose: () => void; children: React.Rea
                     boxShadow: "0 12px 40px rgba(0,0,0,0.45)" }}
            onClick={(e) => e.stopPropagation()}>
         {children}
+      </div>
+    </div>
+  );
+}
+
+// Kartu project: SPESIMEN huruf project sbg elemen utama, metadata di bawahnya.
+function ProjectCard({ p, canDelete, busy, onOpen, onRename, onDelete }: {
+  p: ProjectSummary; canDelete: boolean; busy: boolean;
+  onOpen: () => void; onRename: () => void; onDelete: () => void;
+}) {
+  const fam = useProjectFont(p.id, p.updatedAt);
+  // Huruf project bila sudah ada preview; kalau belum, huruf UI (kartu tetap terbaca, tak "rusak").
+  const specimen = fam ? { fontFamily: `"${fam}"` } : undefined;
+  return (
+    <div
+      onClick={onOpen}
+      className="group relative rounded-2xl border overflow-hidden cursor-pointer transition-all duration-150
+                 hover:-translate-y-0.5"
+      style={{ borderColor: "var(--border)", background: "var(--bg-2)" }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; }}
+    >
+      {/* Spesimen — tinggi tetap agar grid rata walau nama/metadata beda panjang. */}
+      <div className="relative grid place-items-center overflow-hidden"
+           style={{ height: 132, background: "var(--panel)" }}>
+        <div className="text-center leading-none select-none px-3" style={specimen}>
+          <div style={{ fontSize: 46, color: "var(--glyph)", lineHeight: 1 }}>Aa</div>
+          <div className="mt-2 truncate" style={{ fontSize: 12, color: "var(--faint)", letterSpacing: "0.04em" }}>
+            ABCabc0123
+          </div>
+        </div>
+        {!fam && (
+          <span className="absolute bottom-2 right-2.5 text-[10px]" style={{ color: "var(--faint)" }}>
+            pratinjau belum ada
+          </span>
+        )}
+        {canDelete && (
+          <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100
+                          transition-opacity rounded-lg p-0.5"
+               style={{ background: "color-mix(in srgb, var(--bg-2) 82%, transparent)" }}>
+            <button title="Ganti nama project" disabled={busy} className="text-faint hover:text-[var(--accent)] p-1"
+                    onClick={(e) => { e.stopPropagation(); onRename(); }}>
+              <Pencil className="size-4" />
+            </button>
+            <button title="Hapus project" disabled={busy} className="text-faint hover:text-red-500 p-1"
+                    onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+              {busy ? <CircleNotch className="size-4 animate-spin" /> : <Trash className="size-4" />}
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="p-3.5 border-t" style={{ borderColor: "var(--border)" }}>
+        <div className="flex items-center gap-2">
+          <div className="font-medium truncate flex-1">{p.family}</div>
+          {p.active && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-md shrink-0 font-medium"
+                  style={{ background: "color-mix(in srgb, var(--accent) 18%, transparent)", color: "var(--accent)" }}>
+              aktif
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-faint truncate mt-1">
+          {p.style ?? "—"} · {p.glyphCount ?? 0} glyph · {rel(p.updatedAt)}
+        </div>
       </div>
     </div>
   );
@@ -87,12 +178,18 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
       {/* bilah judul OS disembunyikan → strip atas (fixed) menjaga jendela bisa diseret; tinggi 30px
           < padding p-8, jadi tak menutupi baris header (di y≈32). Tombol lampu-lalu-lintas macOS di sini. */}
       <div className="app-drag fixed top-0 left-0 right-0 z-10" style={{ height: 30 }} />
-      <div className="max-w-5xl mx-auto p-8">
-        <div className="flex items-center gap-3 mb-6">
-          <img src={logo} alt="Sensatype" draggable={false} className="size-7 rounded-lg shrink-0" />
-          <h1 className="text-xl font-semibold">Project Anda</h1>
-          {items && <span className="text-muted text-sm">{items.length} project</span>}
-          <div className="ml-auto flex items-center gap-3">
+      <div className="max-w-5xl mx-auto px-8 pt-10 pb-12">
+        <div className="flex items-start gap-3 mb-8">
+          <img src={logo} alt="Sensatype" draggable={false} className="size-9 rounded-xl shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold leading-tight">Project Anda</h1>
+            <p className="text-sm text-faint mt-0.5">
+              {items === null ? "Memuat…"
+                : items.length === 0 ? "Belum ada project"
+                : `${items.length} project · klik kartu untuk membuka editor`}
+            </p>
+          </div>
+          <div className="ml-auto flex items-center gap-3 shrink-0">
             <button className="btn btn-accent" onClick={onCreate}>
               <Plus className="size-4" /> Project baru
             </button>
@@ -110,58 +207,29 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
         {items === null ? (
           <div className="grid place-items-center py-24 text-muted"><CircleNotch className="size-6 animate-spin" /></div>
         ) : items.length === 0 ? (
-          <div className="grid place-items-center py-24 text-center gap-3">
-            <FolderOpen className="size-10 text-faint" />
-            <p className="text-muted">Belum ada project. Mulai dengan membuat yang baru.</p>
-            <button className="btn btn-accent" onClick={onCreate}><Plus className="size-4" /> Project baru</button>
-          </div>
+          // Kosong: kartu ber-garis putus sbg ajakan, bukan sekadar teks di tengah layar.
+          <button onClick={onCreate}
+                  className="w-full rounded-2xl grid place-items-center gap-3 py-20 transition-colors"
+                  style={{ border: "1px dashed var(--border-2)", background: "var(--bg-2)" }}>
+            <FolderOpen className="size-9" style={{ color: "var(--faint)" }} />
+            <div className="text-center">
+              <div className="font-medium">Belum ada project</div>
+              <p className="text-sm text-faint mt-1">Impor specimen SVG/PDF untuk memulai font pertama Anda.</p>
+            </div>
+            <span className="btn btn-accent mt-1"><Plus className="size-4" /> Project baru</span>
+          </button>
         ) : (
-          <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+          <div className="grid gap-5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
             {items.map((p) => (
-              <div
+              <ProjectCard
                 key={p.id}
-                onClick={() => onOpen(p.id)}
-                className="group rounded-xl border p-4 cursor-pointer transition-colors hover:border-[var(--accent)]"
-                style={{ borderColor: "var(--border)", background: "var(--bg-2)" }}
-              >
-                <div className="flex items-start gap-2.5">
-                  <div className="size-9 rounded-lg grid place-items-center shrink-0"
-                       style={{ background: "color-mix(in srgb, var(--accent) 16%, transparent)", color: "var(--accent)" }}>
-                    <TextT className="size-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium truncate">{p.family}</div>
-                    <div className="text-muted text-xs truncate">
-                      {p.style ?? "—"}{p.active ? " · aktif" : ""}
-                    </div>
-                  </div>
-                  {canDelete && (
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        title="Ganti nama project"
-                        onClick={(e) => { e.stopPropagation(); setRenaming(p); }}
-                        disabled={busyId === p.id}
-                        className="text-faint hover:text-[var(--accent)] p-1"
-                      >
-                        <Pencil className="size-4" />
-                      </button>
-                      <button
-                        title="Hapus project"
-                        onClick={(e) => { e.stopPropagation(); setConfirmDel(p); }}
-                        disabled={busyId === p.id}
-                        className="text-faint hover:text-red-500 p-1"
-                      >
-                        {busyId === p.id ? <CircleNotch className="size-4 animate-spin" /> : <Trash className="size-4" />}
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-faint mt-3">
-                  <span>{p.glyphCount ?? 0} glyph</span>
-                  <span>·</span>
-                  <span>{rel(p.updatedAt)}</span>
-                </div>
-              </div>
+                p={p}
+                canDelete={canDelete}
+                busy={busyId === p.id}
+                onOpen={() => onOpen(p.id)}
+                onRename={() => setRenaming(p)}
+                onDelete={() => setConfirmDel(p)}
+              />
             ))}
           </div>
         )}

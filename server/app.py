@@ -582,6 +582,22 @@ def preview():
                     headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/projects/{pid}/preview.woff2")
+def project_preview(pid: str):
+    """Webfont pratinjau milik SATU project (bukan hanya yang aktif) — Beranda memakainya agar
+    tiap kartu tampil dalam HURUF PROJECT ITU SENDIRI, bukan ikon generik.
+    _safe() memvalidasi id (anti path-traversal). 404 bila project belum pernah dikompilasi;
+    Beranda menanganinya dgn fallback, bukan error."""
+    try:
+        f = library._safe(pid) / "preview.woff2"
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not f.exists():
+        raise HTTPException(404, "Belum ada preview")
+    return Response(f.read_bytes(), media_type="font/woff2",
+                    headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/export")
 def export(_: dict = Depends(auth.require_access)):
     if not project.exists:

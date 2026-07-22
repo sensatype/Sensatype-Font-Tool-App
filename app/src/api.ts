@@ -217,6 +217,11 @@ export const api = {
     fetch(`${BASE}/master`, { method: "POST", body: form }).then(j<ProjectState>),
 
   previewUrl: (version?: number) => `${BASE}/preview.woff2?v=${version ?? Date.now()}`,
+
+  // Webfont pratinjau milik SATU project — Beranda merender tiap kartu dalam hurufnya sendiri.
+  // Di-cache-bust per updatedAt supaya kartu ikut segar setelah project diedit.
+  projectPreviewUrl: (id: string, version?: number) =>
+    `${BASE}/projects/${encodeURIComponent(id)}/preview.woff2?v=${version ?? 0}`,
   exportUrl: () => `${BASE}/export`,
 
   // Ambil arsip font (ZIP) sebagai blob + nama file dari header → dipakai dialog "Simpan sebagai".
