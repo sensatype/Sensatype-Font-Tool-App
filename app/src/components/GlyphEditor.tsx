@@ -308,13 +308,23 @@ export function GlyphEditor({
   }, [kernScope]); // eslint-disable-line react-hooks/exhaustive-deps
   // SMART KERNING: hitung saran optikal (sadar-bentuk) dari outline pasangan → tahan sbg nilai
   // yang siap "Terapkan". Baseline diambil SEGAR (paralel) — kernInfoRef bisa masih milik pasangan lama.
-  const computeSmart = useCallback(async () => {
+  // force=true → permintaan eksplisit ("Hitung ulang"/ganti kerapatan): saran BOLEH menimpa nilai
+  // yang sudah ditetapkan. force=false (otomatis) → provenance dari UFO dihormati.
+  const computeSmart = useCallback(async (force = false) => {
     if (!kernLeft || !kernRight || !glyphNames.includes(kernLeft) || !glyphNames.includes(kernRight)) return;
     setSmartBusy(true);
     try {
       const [r, k] = await Promise.all([api.smartKern(kernLeft, kernRight, kernModeRef.current),
                                         api.getKerning(kernLeft, kernRight)]);
       setKernInfo(k); kernInfoRef.current = k;
+      // Dicek DI SINI (bukan hanya di efek) karena getKerning-nya asinkron: efek bisa berjalan
+      // sebelum provenance tiba, lalu saran terlanjur menimpa nilai pengguna.
+      if (!force && k.custom) {
+        smartSettled.current.add(pairKey(kernLeft, kernRight));
+        setKernVal(kernScoped(k, "smart"));               // tampilkan NILAI ANDA
+        kernDirtyRef.current = false; setKernDirty(false); // tak ada yang perlu "Terapkan"
+        return;
+      }
       setKernVal(r.value);
       const dirty = r.value !== (k.classValue ?? 0);
       kernDirtyRef.current = dirty; setKernDirty(dirty); // beda dari tersimpan → tawarkan "Terapkan"
@@ -324,14 +334,23 @@ export function GlyphEditor({
   useEffect(() => {
     if (mode !== "kerning" || kernScope !== "smart" || kernDirtyRef.current) return;
     // Pengguna sudah menetapkan nilai utk pasangan ini → JANGAN timpa dgn saran sistem.
+    // Dua sumber: penanda sesi ini, DAN provenance dari UFO (kernInfo.custom) yang bertahan
+    // setelah aplikasi ditutup — tanpa yang kedua, refresh membuat saran muncul lagi dan
+    // pengguna mengira nilainya "balik ke rekomendasi sistem".
     if (kernLeft && kernRight && smartSettled.current.has(pairKey(kernLeft, kernRight))) return;
+    if (kernInfoRef.current?.custom
+        && kernInfoRef.current.left === kernLeft && kernInfoRef.current.right === kernRight) {
+      smartSettled.current.add(pairKey(kernLeft, kernRight)); // samakan penanda sesi dgn UFO
+      setKernVal(kernScoped(kernInfoRef.current, "smart"));   // tampilkan NILAI ANDA, bukan saran
+      return;
+    }
     computeSmart();
   }, [kernScope, mode, computeSmart, fontV, kernLeft, kernRight]);
   // Hitung ulang atas PERMINTAAN pengguna → cabut status "sudah ditetapkan" utk pasangan ini,
   // lalu hitung. Ini satu-satunya cara saran menimpa nilai yang sudah ditetapkan.
   const recomputeSmart = useCallback(() => {
     if (kernLeft && kernRight) smartSettled.current.delete(pairKey(kernLeft, kernRight));
-    computeSmart();
+    computeSmart(true); // eksplisit → abaikan provenance, tampilkan saran baru
   }, [computeSmart, kernLeft, kernRight]);
   // Ganti kerapatan = permintaan eksplisit utk saran BERBEDA → sama spt Hitung ulang.
   const pickKernMode = useCallback((m: KernMode) => {
@@ -356,7 +375,7 @@ export function GlyphEditor({
       ? custom >= 2
         ? `\n\nSistem akan MENGIKUTI SELERA ANDA dari ${custom} pasangan yang Anda tetapkan — pasangan itu dipertahankan, sisanya menyesuaikan.`
         : custom === 1
-          ? "\n\nBaru 1 pasangan yang Anda tetapkan — belum cukup untuk menyimpulkan selera, jadi hasilnya memakai saran sistem apa adanya. Tetapkan minimal 2 pasangan (atur nilainya lalu klik Terapkan) agar sistem mengikuti selera Anda."
+          ? "\n\nSistem akan MENGIKUTI SELERA ANDA dari 1 pasangan yang Anda tetapkan. Semakin banyak pasangan yang Anda setel, semakin tepat penyesuaiannya."
           : "\n\nBelum ada pasangan yang Anda tetapkan, jadi hasilnya memakai saran sistem apa adanya.\nAgar sistem mengikuti selera Anda: atur beberapa pasangan → klik Terapkan → baru jalankan ini."
       : "";
     const pending = kernDirty
@@ -384,7 +403,8 @@ export function GlyphEditor({
         } else if (r.learnedFrom >= 2) {
           belajar = `\n\nNilai Anda ternyata ~sama dengan saran sistem (dipelajari dari ${r.learnedFrom} pasangan), jadi tak ada penyesuaian.`;
         } else if (r.learnedFrom === 1) {
-          belajar = "\n\nBaru 1 pasangan yang Anda tetapkan — belum cukup untuk menyimpulkan selera. Tetapkan minimal 2, lalu jalankan lagi.";
+          belajar = `\n\n✓ Mengikuti selera Anda: ${pct > 0 ? "+" : ""}${pct}% dari saran sistem (dipelajari dari 1 pasangan).\n`
+            + `${r.preserved} pasangan yang Anda tetapkan dipertahankan. Setel beberapa pasangan lagi agar penyesuaiannya makin tepat.`;
         } else {
           belajar = "\n\nTidak ada pasangan yang Anda tetapkan, jadi dipakai saran sistem apa adanya.\n"
             + "Agar sistem mengikuti selera Anda: atur beberapa pasangan → klik Terapkan → jalankan ini lagi.";

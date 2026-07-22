@@ -842,8 +842,12 @@ class Project:
             if userv == 0:
                 continue
             ratios.append(userv / sysv)
-        if len(ratios) < 2:  # satu contoh belum cukup jadi "selera"
-            return 1.0, len(ratios)
+        # SATU contoh pun dipakai: kalau pengguna sudah repot menyetel sebuah pasangan lalu memilih
+        # "Timpa semua", niatnya jelas — menuntut contoh kedua membuat sistem terasa keras kepala.
+        # Risiko ekstrapolasi dari sedikit contoh dibatasi clamp 0,5–2,0, dan UI menyebut dari
+        # berapa pasangan ia belajar supaya pengguna bisa menilai sendiri.
+        if not ratios:
+            return 1.0, 0
         return max(0.5, min(2.0, statistics.median(ratios))), len(ratios)
 
     def custom_kern_pairs(self):
@@ -873,6 +877,10 @@ class Project:
             "leftGroup": lg, "rightGroup": rg,
             "classValue": int(kern[(cl, cr)]) if (cl, cr) in kern else None,
             "pairValue": int(kern[(left, right)]) if (left, right) in kern else None,
+            # Nilai ini DITETAPKAN pengguna? Dibaca dari provenance di UFO → BERTAHAN antar-sesi.
+            # UI memakainya agar saran Smart tak menghitung ulang & menimpa nilai pengguna setelah
+            # aplikasi dibuka lagi (penanda di memori saja hilang saat refresh).
+            "custom": f"{left} {right}" in self._custom_keys(font),
         }
 
     def smart_kern(self, left, right, mode=None):

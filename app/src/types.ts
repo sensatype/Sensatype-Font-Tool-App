@@ -40,6 +40,7 @@ export interface KernInfo {
   rightGroup: string | null;     // public.kern2.* glyph kanan
   classValue: number | null;     // nilai (grupKiri, grupKanan)
   pairValue: number | null;      // exception (glyphKiri, glyphKanan)
+  custom?: boolean;              // true = DITETAPKAN pengguna (dari provenance UFO, tahan refresh)
 }
 
 // data render seluruh glyph (mode Text — sekali muat)
