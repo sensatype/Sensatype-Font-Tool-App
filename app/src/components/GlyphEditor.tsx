@@ -144,7 +144,13 @@ export function GlyphEditor({
   const [kernDirty, setKernDirty] = useState(false);
   const kernDirtyRef = useRef(kernDirty); kernDirtyRef.current = kernDirty;
   const kernScopeRef = useRef(kernScope); kernScopeRef.current = kernScope; // utk .then fetch (scope bisa berganti selagi fetch jalan)
-  const smartSkipRef = useRef(false); // one-shot: bump fontV berikut berasal dari apply smart kita → jangan hitung ulang saran
+  // Pasangan yang nilainya SUDAH DITETAPKAN pengguna (Terapkan / seret di mode Text). Saran Smart
+  // TIDAK pernah menimpa nilai yang sudah ditetapkan — dulu penjaganya cuma one-shot di tombol
+  // Terapkan, sehingga tiap bump fontV dari jalur lain (seret kern, edit glyph, undo) memicu
+  // hitung-ulang yang menimpa nilai pengguna → terasa "sistem memaksa". Saran hanya dihitung ulang
+  // saat pasangan berganti, atau saat pengguna MEMINTA (Hitung ulang / ganti kerapatan).
+  const smartSettled = useRef<Set<string>>(new Set());
+  const pairKey = (l: string, r: string) => `${l} ${r}`;
   const kernInfoRef = useRef<KernInfo | null>(null); kernInfoRef.current = kernInfo;
   const pendingKern = useRef<number | null>(null); // nilai kern yg BARU kita tulis → refetch echo tak menimpa nilai live
   // scope "Semuanya" = TRACKING GLOBAL (letter-spacing): nilai ABSOLUT & PERSISTEN yang berlaku
@@ -278,7 +284,7 @@ export function GlyphEditor({
   // pasangan berganti → reset guard echo + buang nilai tertahan. Ref di-sync SINKRON:
   // efek smart di bawah berjalan pada commit yang sama & membaca ref ini — kalau hanya setState,
   // ref masih berisi dirty lama → computeSmart terlewat → saran smart tak pernah dihitung.
-  useEffect(() => { pendingKern.current = null; smartSkipRef.current = false; kernDirtyRef.current = false; setKernDirty(false);
+  useEffect(() => { pendingKern.current = null; kernDirtyRef.current = false; setKernDirty(false);
     if (kernScopeRef.current === "all") setTrackVal(tracking); // scope "Semuanya": buang draft spasi yg belum diterapkan agar field tak menyesatkan (tampil "40" padahal belum tersimpan)
   }, [kernLeft, kernRight]); // eslint-disable-line react-hooks/exhaustive-deps
   // ambil info kern saat pasangan berubah — HANYA di mode Kerning (hemat: commit node/spasi
@@ -317,18 +323,24 @@ export function GlyphEditor({
   }, [kernLeft, kernRight, glyphNames]);
   useEffect(() => {
     if (mode !== "kerning" || kernScope !== "smart" || kernDirtyRef.current) return;
-    if (smartSkipRef.current) { smartSkipRef.current = false; return; } // bump fontV dari apply kita sendiri → jangan timpa nilai yang baru diterapkan dgn saran baru
+    // Pengguna sudah menetapkan nilai utk pasangan ini → JANGAN timpa dgn saran sistem.
+    if (kernLeft && kernRight && smartSettled.current.has(pairKey(kernLeft, kernRight))) return;
     computeSmart();
-  }, [kernScope, mode, computeSmart, fontV]);
-  // Ganti kerapatan → hitung ulang SEGERA, termasuk saat nilai masih tertahan (dirty): user memang
-  // sedang meminta saran yang berbeda, jadi guard "jangan timpa" di effect di atas tak berlaku.
+  }, [kernScope, mode, computeSmart, fontV, kernLeft, kernRight]);
+  // Hitung ulang atas PERMINTAAN pengguna → cabut status "sudah ditetapkan" utk pasangan ini,
+  // lalu hitung. Ini satu-satunya cara saran menimpa nilai yang sudah ditetapkan.
+  const recomputeSmart = useCallback(() => {
+    if (kernLeft && kernRight) smartSettled.current.delete(pairKey(kernLeft, kernRight));
+    computeSmart();
+  }, [computeSmart, kernLeft, kernRight]);
+  // Ganti kerapatan = permintaan eksplisit utk saran BERBEDA → sama spt Hitung ulang.
   const pickKernMode = useCallback((m: KernMode) => {
     if (m === kernModeRef.current) return;
     kernModeRef.current = m;
     setKernMode(m);
     try { localStorage.setItem("ge.kernMode", m); } catch { /* storage penuh — abaikan */ }
-    computeSmart();
-  }, [computeSmart]);
+    recomputeSmart();
+  }, [recomputeSmart]);
   // AUTO-KERN SELURUH FONT: hitung + terapkan kern optikal utk semua pasangan huruf/angka.
   // Dua mode (pilihan user): onlyEmpty=true → hanya MENGISI yang belum diatur (aman);
   // onlyEmpty=false → TIMPA SEMUA (termasuk yang sudah diatur manual).
@@ -420,7 +432,6 @@ export function GlyphEditor({
       // Non-destruktif (tak mengubah kerning) & PERSISTEN (field tetap menunjukkan nilainya).
       onTracking?.(Math.round(trackVal)); setKernDirty(false); return;
     }
-    if (kernScope === "smart") smartSkipRef.current = true; // bump fontV hasil apply ini jangan memicu hitung-ulang yang menimpa nilai baru
     commitKern(kernVal); setKernDirty(false);
   }
   // BATAL: buang nilai tertahan, kembali ke nilai tersimpan
@@ -433,6 +444,7 @@ export function GlyphEditor({
     if (!kernLeft || !kernRight || kernScope === "all") return; // "Semuanya" = tracking, bukan kern pasangan
     if (!glyphNames.includes(kernLeft) || !glyphNames.includes(kernRight)) return; // partner belum valid → jangan tulis
     const writeScope = kernScope === "smart" ? "class" : kernScope; // Smart → ditulis di level kelas (menyebar ke se-grup)
+    smartSettled.current.add(pairKey(kernLeft, kernRight)); // nilai DITETAPKAN pengguna → saran tak boleh menimpanya
     setKernVal(v); pendingKern.current = v;                     // instan (JANGAN ditimpa respons/echo → tak lompat)
     const key = `${kernLeft} ${kernRight}`;
     kernCache.current[key] = v; kernWroteAt.current[key] = Date.now(); // proof teks ikut seketika + terlindung dari refetch telat
@@ -451,6 +463,7 @@ export function GlyphEditor({
   }
   function proofKernCommit(l: string, r: string, v: number) {
     const key = `${l} ${r}`;
+    smartSettled.current.add(key); // diseret pengguna → saran Smart tak boleh mengembalikannya
     kernCache.current[key] = v; kernWroteAt.current[key] = Date.now();
     setProofTick((t) => t + 1);
     serial(() => api.setKerning({ left: l, right: r, value: v, scope: "class", recompile: false }))
@@ -1810,8 +1823,8 @@ export function GlyphEditor({
               </div>
             )}
             {kernScope === "smart" && (
-              <button className="btn !py-1.5" onClick={computeSmart} disabled={smartBusy}
-                title="Hitung ulang saran Smart (kern optikal dari bentuk outline) untuk pasangan ini">
+              <button className="btn !py-1.5" onClick={recomputeSmart} disabled={smartBusy}
+                title="Hitung ulang saran Smart untuk pasangan ini. Ini SATU-SATUNYA cara saran menimpa nilai yang sudah Anda tetapkan — di luar itu nilai Anda selalu dipertahankan.">
                 {smartBusy ? <CircleNotch className="size-4 animate-spin" /> : <Sparkle className="size-4" />}Hitung ulang
               </button>
             )}
@@ -1853,7 +1866,9 @@ export function GlyphEditor({
                   ? "Saran Smart siap — klik Terapkan (disimpan level kelas), atau ✕ batal"
                   : "Nilai belum ditetapkan — klik Terapkan untuk menyimpan, atau ✕ untuk batal")
                 : kernScope === "smart"
-                ? `Smart = kern optikal dari bentuk outline · kerapatan ${(KERN_MODES.find((m) => m.id === kernMode)?.label ?? "Sedang").toLowerCase()}. Pilih pasangan → saran muncul.`
+                ? (kernLeft && kernRight && smartSettled.current.has(`${kernLeft} ${kernRight}`)
+                  ? `Nilai Anda dipakai untuk ${kernLeft}·${kernRight} — sistem tidak akan menimpanya. Klik "Hitung ulang" bila ingin saran baru.`
+                  : `Smart = kern optikal dari bentuk outline · kerapatan ${(KERN_MODES.find((m) => m.id === kernMode)?.label ?? "Sedang").toLowerCase()}. Pilih pasangan → saran muncul.`)
                 : kernScope === "all"
                 ? "Spasi global → jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning · persisten & ikut export"
                 : kernScope === "class"
