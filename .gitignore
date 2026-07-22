@@ -34,3 +34,6 @@ content.json
 
 # token login (jangan pernah di-commit / dibundel)
 auth-token.json
+
+# knowledge graph graphify (artefak lokal, di-regenerasi oleh hook tiap commit)
+graphify-out/
