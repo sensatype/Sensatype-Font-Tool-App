@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
+import { MagnifyingGlassPlus, MagnifyingGlassMinus, CornersOut } from "@phosphor-icons/react";
 import type { StagedGuide, StagingState } from "../types";
 
 const MIN_Z = 0.25, MAX_Z = 10; // 25%–1000%
@@ -427,10 +427,10 @@ export function SpecimenCanvas({
 
       <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-lg p-1"
         style={{ background: "var(--panel)", border: "1px solid var(--border)" }}>
-        <button className="btn !p-1.5" onClick={() => zoomBtn(0.8)} title="Zoom out"><ZoomOut className="size-4" /></button>
+        <button className="btn !p-1.5" onClick={() => zoomBtn(0.8)} title="Zoom out"><MagnifyingGlassMinus className="size-4" /></button>
         <span className="text-xs text-muted tabular-nums w-12 text-center">{Math.round(zoom * 100)}%</span>
-        <button className="btn !p-1.5" onClick={() => zoomBtn(1.25)} title="Zoom in"><ZoomIn className="size-4" /></button>
-        <button className="btn !p-1.5" onClick={reset} title="Reset (100%)"><Maximize className="size-4" /></button>
+        <button className="btn !p-1.5" onClick={() => zoomBtn(1.25)} title="Zoom in"><MagnifyingGlassPlus className="size-4" /></button>
+        <button className="btn !p-1.5" onClick={reset} title="Reset (100%)"><CornersOut className="size-4" /></button>
       </div>
     </div>
   );

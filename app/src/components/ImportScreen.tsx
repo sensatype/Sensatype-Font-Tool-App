@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Upload, FileType2, Loader2 } from "lucide-react";
+import { UploadSimple, FileText, CircleNotch } from "@phosphor-icons/react";
 import { api } from "../api";
 import logo from "../assets/logo.svg";
 import type { ProjectState } from "../types";
@@ -125,12 +125,12 @@ export function ImportScreen({
         >
           {busy ? (
             <div className="flex flex-col items-center gap-3 text-muted">
-              <Loader2 className="size-8 animate-spin" />
+              <CircleNotch className="size-8 animate-spin" />
               <span>Mengimpor & mengompilasi…</span>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-3">
-              {mode === "specimen" ? <FileType2 className="size-10 text-accent" /> : <Upload className="size-10 text-accent" />}
+              {mode === "specimen" ? <FileText className="size-10 text-accent" /> : <UploadSimple className="size-10 text-accent" />}
               <div className="font-medium text-base">
                 {mode === "specimen" ? "Jatuhkan 1 SVG / PDF specimen di sini" : "Jatuhkan beberapa SVG glyph"}
               </div>

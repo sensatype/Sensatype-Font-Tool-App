@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Download, RefreshCw, FolderOpen, Loader2, Eraser, Settings } from "lucide-react";
+import { DownloadSimple, ArrowsClockwise, FolderOpen, CircleNotch, Eraser, Gear } from "@phosphor-icons/react";
 import { api } from "../api";
 import { can } from "../auth";
 import { AccountChip } from "./AccountChip";
@@ -91,7 +91,7 @@ export function TopBar({
         {/* preview webfont (grid/bar bawah) sedang di-compile menyusul edit — bukan macet */}
         {syncing && (
           <span className="text-faint text-[11px] flex items-center gap-1 whitespace-nowrap" title="Preview grid & bar bawah sedang diperbarui — editor tetap live">
-            <Loader2 className="size-3 animate-spin" /> sinkron preview…
+            <CircleNotch className="size-3 animate-spin" /> sinkron preview…
           </span>
         )}
       </div>
@@ -113,11 +113,11 @@ export function TopBar({
         <button className="btn" disabled={busy || clearing}
           title="Nolkan SEMUA nilai kerning (kelas kern/grup bentuk tetap ada → bisa diatur massal lewat scope Kelas). Berlaku permanen ke seluruh font."
           onClick={async () => { if (clearing) return; setClearing(true); try { await onClearKern(); } finally { setClearing(false); } }}>
-          {clearing ? <Loader2 className="size-4 animate-spin" /> : <Eraser className="size-4" />}
+          {clearing ? <CircleNotch className="size-4 animate-spin" /> : <Eraser className="size-4" />}
           Restart Kern
         </button>
         <button className="btn" disabled={busy} onClick={() => onRespace(project.preset ?? "display-serif")}>
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+          {busy ? <CircleNotch className="size-4 animate-spin" /> : <ArrowsClockwise className="size-4" />}
           Re-seed
         </button>
         <button className="btn" onClick={onHome} title="Kembali ke daftar project">
@@ -128,11 +128,11 @@ export function TopBar({
         {can.export() && (
           <button className="btn btn-accent" onClick={handleExport} disabled={exporting}
             title="Export font — pilih lokasi penyimpanan">
-            {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export
+            {exporting ? <CircleNotch className="size-4 animate-spin" /> : <DownloadSimple className="size-4" />} Export
           </button>
         )}
         <button className="btn !p-1.5" onClick={settings.open} title="Pengaturan (⌘/Ctrl+,)">
-          <Settings className="size-4" />
+          <Gear className="size-4" />
         </button>
         <div className="h-5 w-px" style={{ background: "var(--border-2)" }} />
         <AccountChip />

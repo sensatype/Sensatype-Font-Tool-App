@@ -18,9 +18,9 @@
     "release": "npm run build && bash ../scripts/build-content.sh && electron-builder --publish always"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "adm-zip": "^0.5.18",
     "electron-updater": "^6.3.9",
-    "lucide-react": "^0.544.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

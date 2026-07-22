@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Move, Spline, Square, Circle, Trash2, ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Magnet,
-  Boxes, Ruler, ArrowLeftRight, Type, MousePointer2,
-  FlipHorizontal2, FlipVertical2, RotateCcw, RotateCw, Anchor as AnchorIcon,
-  Copy, Group, Ungroup, Combine, Loader2, Crosshair, Grid3x3, Moon, Sun, Check, X, Sparkles, Wand2 } from "lucide-react";
+import { ArrowsOutCardinal, BezierCurve, Square, Circle, Trash, MagnifyingGlassPlus, MagnifyingGlassMinus, CornersOut, ArrowUUpLeft, ArrowUUpRight, Magnet,
+  Cube, Ruler, ArrowsLeftRight, TextT, Cursor,
+  FlipHorizontal, FlipVertical, ArrowCounterClockwise, ArrowClockwise, Anchor as AnchorIcon,
+  Copy, SelectionPlus, SelectionSlash, Unite, CircleNotch, Crosshair, GridNine, Moon, Sun, Check, X, Sparkle, MagicWand } from "@phosphor-icons/react";
 import { api } from "../api";
 import { commandFor, comboFromEvent, type CmdContext } from "../keymap";
 import { contoursToPath, addNode, removeNode, segClosest } from "../outline";
@@ -15,12 +15,12 @@ const COMP_COLOR = "#4aa3df";   // warna komponen (biru)
 // 6 mode ala FontLab.
 type Mode = "contour" | "element" | "metrics" | "kerning" | "cleanup" | "text";
 const TOOLS: { id: Mode; label: string; icon: any; hint: string; ready: boolean }[] = [
-  { id: "contour", label: "Contour", icon: Spline, hint: "Edit node, handle, kontur", ready: true },
-  { id: "element", label: "Element", icon: Boxes, hint: "Pindah/transform/group elemen utuh", ready: true },
+  { id: "contour", label: "Contour", icon: BezierCurve, hint: "Edit node, handle, kontur", ready: true },
+  { id: "element", label: "Element", icon: Cube, hint: "Pindah/transform/group elemen utuh", ready: true },
   { id: "metrics", label: "Metrics", icon: Ruler, hint: "Advance & sidebearing", ready: true },
-  { id: "kerning", label: "Kerning", icon: ArrowLeftRight, hint: "Atur pasangan kerning", ready: true },
-  { id: "cleanup", label: "Rapikan", icon: Wand2, hint: "Hapus node/handle berlebih — bentuk dipertahankan", ready: true },
-  { id: "text", label: "Text", icon: Type, hint: "Ketik/tempel teks (proofing)", ready: true },
+  { id: "kerning", label: "Kerning", icon: ArrowsLeftRight, hint: "Atur pasangan kerning", ready: true },
+  { id: "cleanup", label: "Rapikan", icon: MagicWand, hint: "Hapus node/handle berlebih — bentuk dipertahankan", ready: true },
+  { id: "text", label: "Text", icon: TextT, hint: "Ketik/tempel teks (proofing)", ready: true },
 ];
 // mode terakhir yang dipilih user — level modul agar SELAMAT dari remount per-glyph (key=nama)
 const lastModeRef: { mode: Mode } = { mode: "contour" };
@@ -1344,7 +1344,7 @@ export function GlyphEditor({
             </button>
             <button className="btn !p-1.5" onClick={() => setShowGrid((s) => !s)} title={showGrid ? "Garis grid kanvas: TAMPIL (klik utk sembunyikan)" : "Garis grid kanvas: tersembunyi"}
               style={{ background: showGrid ? "var(--accent)" : "transparent", color: showGrid ? "#fff" : "var(--muted)" }}>
-              <Grid3x3 className="size-3.5" />
+              <GridNine className="size-3.5" />
             </button>
             <button className="btn !p-1.5" onClick={() => setSnapNodes((s) => !s)}
               title={snapNodes
@@ -1362,8 +1362,8 @@ export function GlyphEditor({
               className="field !w-12 !py-1 !px-1.5 text-xs tabular-nums" style={{ opacity: snapOn ? 1 : 0.5 }} />
           </div>
           <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }}>
-            <button className="btn !p-1.5" disabled={!canUndo} onClick={undo} title="Undo (⌘Z)"><Undo2 className="size-3.5" /></button>
-            <button className="btn !p-1.5" disabled={!canRedo} onClick={redo} title="Redo (⌘⇧Z)"><Redo2 className="size-3.5" /></button>
+            <button className="btn !p-1.5" disabled={!canUndo} onClick={undo} title="Undo (⌘Z)"><ArrowUUpLeft className="size-3.5" /></button>
+            <button className="btn !p-1.5" disabled={!canRedo} onClick={redo} title="Redo (⌘⇧Z)"><ArrowUUpRight className="size-3.5" /></button>
           </div>
           <span className="text-muted text-xs font-medium tabular-nums">{TOOLS.find((t) => t.id === mode)?.label}</span>
         </div>
@@ -1383,7 +1383,7 @@ export function GlyphEditor({
             {mode === "contour" && (
               <>
                 <div className="h-px mx-1 my-0.5" style={{ background: "var(--border)" }} />
-                <ToolBtn active={tool === "select"} ready onClick={() => setTool("select")} icon={MousePointer2} label="Pilih" hint="Pilih & geser node (dobel-klik segmen = tambah node)" />
+                <ToolBtn active={tool === "select"} ready onClick={() => setTool("select")} icon={Cursor} label="Pilih" hint="Pilih & geser node (dobel-klik segmen = tambah node)" />
                 <ToolBtn active={tool === "rect"} ready onClick={() => setTool("rect")} icon={Square} label="Kotak" hint="Seret untuk gambar kotak (Shift = bujur sangkar)" />
                 <ToolBtn active={tool === "ellipse"} ready onClick={() => setTool("ellipse")} icon={Circle} label="Elips" hint="Seret untuk gambar elips (Shift = lingkaran)" />
                 <ToolBtn active={tool === "anchor"} ready onClick={() => setTool("anchor")} icon={AnchorIcon} label="Anchor" hint="Klik untuk taruh anchor (titik attachment bernama)" />
@@ -1608,10 +1608,10 @@ export function GlyphEditor({
           </svg>
         {/* kontrol zoom (di luar SVG, fixed di pojok) */}
         <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-lg p-1" style={{ background: "var(--panel)", border: "1px solid var(--border)" }}>
-          <button className="btn !p-1.5" onClick={() => zoomBtn(0.8)} title="Zoom out"><ZoomOut className="size-4" /></button>
+          <button className="btn !p-1.5" onClick={() => zoomBtn(0.8)} title="Zoom out"><MagnifyingGlassMinus className="size-4" /></button>
           <span className="text-xs text-muted tabular-nums w-12 text-center">{Math.round(zoom * 100)}%</span>
-          <button className="btn !p-1.5" onClick={() => zoomBtn(1.25)} title="Zoom in"><ZoomIn className="size-4" /></button>
-          <button className="btn !p-1.5" onClick={resetView} title="Reset (100%)"><Maximize className="size-4" /></button>
+          <button className="btn !p-1.5" onClick={() => zoomBtn(1.25)} title="Zoom in"><MagnifyingGlassPlus className="size-4" /></button>
+          <button className="btn !p-1.5" onClick={resetView} title="Reset (100%)"><CornersOut className="size-4" /></button>
         </div>
           </>
           )}
@@ -1645,7 +1645,7 @@ export function GlyphEditor({
               <Ruler className="size-4" />Ke ink
             </button>
             <button className="btn !py-1.5" onClick={runFitAll} disabled={fitBusy} title="Rapatkan SEMUA glyph ke ink sekaligus (LSB=0, RSB=0, advance = lebar ink). Permanen — konfirmasi dulu.">
-              {fitBusy ? <Loader2 className="size-4 animate-spin" /> : <Ruler className="size-4" />}Semua
+              {fitBusy ? <CircleNotch className="size-4 animate-spin" /> : <Ruler className="size-4" />}Semua
             </button>
             <div className="h-9 w-px self-end mb-1" style={{ background: "var(--border)" }} />
             <Num label="Base ±" value={0} color="var(--accent)" compact resetOnCommit onCommit={(v) => shiftGlyphY(v)} title="Geser glyph vertikal (em); + naik, − turun" />
@@ -1663,7 +1663,7 @@ export function GlyphEditor({
               <Num label="X" value={comps[cSel].transform[4]} color={COMP_COLOR} compact onCommit={(v) => commitComps(comps.map((c, i) => (i === cSel ? { ...c, transform: [c.transform[0], c.transform[1], c.transform[2], c.transform[3], v, c.transform[5]] } : c)))} />
               <Num label="Y" value={comps[cSel].transform[5]} color={COMP_COLOR} compact onCommit={(v) => commitComps(comps.map((c, i) => (i === cSel ? { ...c, transform: [c.transform[0], c.transform[1], c.transform[2], c.transform[3], c.transform[4], v] } : c)))} />
               <Num label="Skala%" value={Math.round(comps[cSel].transform[0] * 100)} color={COMP_COLOR} compact onCommit={(v) => { const s = (v || 100) / 100; commitComps(comps.map((c, i) => (i === cSel ? { ...c, transform: [s, c.transform[1], c.transform[2], s, c.transform[4], c.transform[5]] } : c))); }} />
-              <button className="btn ml-auto" onClick={() => deleteComp(cSel)}><Trash2 className="size-4" /> Hapus komponen</button>
+              <button className="btn ml-auto" onClick={() => deleteComp(cSel)}><Trash className="size-4" /> Hapus komponen</button>
             </>
           ) : aSel != null && anchors[aSel] ? (
             <>
@@ -1677,7 +1677,7 @@ export function GlyphEditor({
               </label>
               <Num label="X" value={anchors[aSel].x} color={ANCHOR_COLOR} compact onCommit={(v) => commitAnchors(anchors.map((a, i) => (i === aSel ? { ...a, x: v } : a)))} />
               <Num label="Y" value={anchors[aSel].y} color={ANCHOR_COLOR} compact onCommit={(v) => commitAnchors(anchors.map((a, i) => (i === aSel ? { ...a, y: v } : a)))} />
-              <button className="btn ml-auto" onClick={() => deleteAnchor(aSel)}><Trash2 className="size-4" /> Hapus anchor</button>
+              <button className="btn ml-auto" onClick={() => deleteAnchor(aSel)}><Trash className="size-4" /> Hapus anchor</button>
             </>
           ) : (
           <>
@@ -1694,16 +1694,16 @@ export function GlyphEditor({
                 onChange={(e) => setAddComp(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addComponent(addComp)} title="Ketik nama glyph basis lalu Tambah" />
               <button className="btn !py-1.5" onClick={() => addComponent(addComp)} disabled={!glyphNames.includes(addComp.trim())} title="Tambah komponen">
-                <Boxes className="size-4" />Tambah
+                <Cube className="size-4" />Tambah
               </button>
               <GlyphNameList id="ge-glyphnames" names={glyphNames} />
             </div>
             {sel.size > 0 && tool === "select" && (
               <div className="flex items-center gap-1 ml-auto p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Transform seleksi (di sekitar pusatnya)">
-                <button className="btn !p-1.5" onClick={() => flipSel("h")} title="Flip horizontal"><FlipHorizontal2 className="size-4" /></button>
-                <button className="btn !p-1.5" onClick={() => flipSel("v")} title="Flip vertical"><FlipVertical2 className="size-4" /></button>
-                <button className="btn !p-1.5" onClick={() => rotateSel(90)} title="Putar 90° CCW"><RotateCcw className="size-4" /></button>
-                <button className="btn !p-1.5" onClick={() => rotateSel(-90)} title="Putar 90° CW"><RotateCw className="size-4" /></button>
+                <button className="btn !p-1.5" onClick={() => flipSel("h")} title="Flip horizontal"><FlipHorizontal className="size-4" /></button>
+                <button className="btn !p-1.5" onClick={() => flipSel("v")} title="Flip vertical"><FlipVertical className="size-4" /></button>
+                <button className="btn !p-1.5" onClick={() => rotateSel(90)} title="Putar 90° CCW"><ArrowCounterClockwise className="size-4" /></button>
+                <button className="btn !p-1.5" onClick={() => rotateSel(-90)} title="Putar 90° CW"><ArrowClockwise className="size-4" /></button>
                 <TransformNum label="Putar°" onApply={(v) => rotateSel(v)} placeholder="0" />
                 <TransformNum label="Skala%" onApply={(v) => scaleSel(v)} placeholder="100" />
               </div>
@@ -1714,7 +1714,7 @@ export function GlyphEditor({
               {selSmooth ? "Jadikan sudut" : "Jadikan halus"}
             </button>
             <button className="btn" onClick={doRemove} disabled={!sel.size}>
-              <Trash2 className="size-4" /> Hapus node{sel.size > 1 ? ` (${sel.size})` : ""}
+              <Trash className="size-4" /> Hapus node{sel.size > 1 ? ` (${sel.size})` : ""}
             </button>
           </>
           )
@@ -1727,18 +1727,18 @@ export function GlyphEditor({
             <div className="flex items-center gap-1 ml-auto">
               {eSel.size > 0 && (
                 <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Transform elemen (di sekitar bbox-nya)">
-                  <button className="btn !p-1.5" onClick={() => elemFlip("h")} title="Flip horizontal"><FlipHorizontal2 className="size-4" /></button>
-                  <button className="btn !p-1.5" onClick={() => elemFlip("v")} title="Flip vertical"><FlipVertical2 className="size-4" /></button>
-                  <button className="btn !p-1.5" onClick={() => elemRotate(90)} title="Putar 90° CCW"><RotateCcw className="size-4" /></button>
-                  <button className="btn !p-1.5" onClick={() => elemRotate(-90)} title="Putar 90° CW"><RotateCw className="size-4" /></button>
+                  <button className="btn !p-1.5" onClick={() => elemFlip("h")} title="Flip horizontal"><FlipHorizontal className="size-4" /></button>
+                  <button className="btn !p-1.5" onClick={() => elemFlip("v")} title="Flip vertical"><FlipVertical className="size-4" /></button>
+                  <button className="btn !p-1.5" onClick={() => elemRotate(90)} title="Putar 90° CCW"><ArrowCounterClockwise className="size-4" /></button>
+                  <button className="btn !p-1.5" onClick={() => elemRotate(-90)} title="Putar 90° CW"><ArrowClockwise className="size-4" /></button>
                   <TransformNum label="Putar°" onApply={(v) => elemRotate(v)} placeholder="0" />
                   <TransformNum label="Skala%" onApply={(v) => elemScale(v)} placeholder="100" />
                 </div>
               )}
               <button className="btn" onClick={duplicateElements} disabled={!eSel.size} title="Duplikat (⌘D)"><Copy className="size-4" /></button>
-              <button className="btn" onClick={groupSel} disabled={eSel.size < 2} title="Group (⌘G)"><Group className="size-4" /></button>
-              <button className="btn" onClick={ungroupSel} disabled={!eSel.size} title="Ungroup (⌘⇧G)"><Ungroup className="size-4" /></button>
-              <button className="btn" onClick={deleteElements} disabled={!eSel.size}><Trash2 className="size-4" />{eSel.size > 1 ? ` ${eSel.size}` : ""}</button>
+              <button className="btn" onClick={groupSel} disabled={eSel.size < 2} title="Group (⌘G)"><SelectionPlus className="size-4" /></button>
+              <button className="btn" onClick={ungroupSel} disabled={!eSel.size} title="Ungroup (⌘⇧G)"><SelectionSlash className="size-4" /></button>
+              <button className="btn" onClick={deleteElements} disabled={!eSel.size}><Trash className="size-4" />{eSel.size > 1 ? ` ${eSel.size}` : ""}</button>
             </div>
           </>
         ) : mode === "kerning" ? (
@@ -1753,7 +1753,7 @@ export function GlyphEditor({
             </label>
             <span className="text-sm font-semibold tabular-nums" title="Pasangan (kiri · kanan)">{kernLeft || "?"} · {kernRight || "?"}</span>
             <button className="btn !py-1.5" onClick={() => setKernSide((s) => (s === "left" ? "right" : "left"))} title="Tukar: glyph aktif di kiri/kanan pasangan">
-              <ArrowLeftRight className="size-4" />{kernSide === "left" ? "aktif di kiri" : "aktif di kanan"}
+              <ArrowsLeftRight className="size-4" />{kernSide === "left" ? "aktif di kiri" : "aktif di kanan"}
             </button>
             <label className="flex items-center gap-1">
               <span className="label">Partner</span>
@@ -1774,9 +1774,9 @@ export function GlyphEditor({
                 return (
                   <button key={s} className="text-xs px-2 py-1 rounded-md font-medium flex items-center gap-1" onClick={() => setKernScope(s)}
                     style={{ background: kernScope === s ? "var(--accent)" : "transparent", color: kernScope === s ? "#fff" : "var(--muted)" }}>
-                    {s === "smart" && <Sparkles className="size-3" />}{label}
+                    {s === "smart" && <Sparkle className="size-3" />}{label}
                     {s === "smart"
-                      ? (kernScope === "smart" && smartBusy && <Loader2 className="size-3 animate-spin" />)
+                      ? (kernScope === "smart" && smartBusy && <CircleNotch className="size-3 animate-spin" />)
                       : (sv != null && <span className="tabular-nums text-[10px] opacity-75">{sv > 0 ? `+${sv}` : sv}</span>)}
                   </button>
                 );
@@ -1812,14 +1812,14 @@ export function GlyphEditor({
             {kernScope === "smart" && (
               <button className="btn !py-1.5" onClick={computeSmart} disabled={smartBusy}
                 title="Hitung ulang saran Smart (kern optikal dari bentuk outline) untuk pasangan ini">
-                {smartBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Hitung ulang
+                {smartBusy ? <CircleNotch className="size-4 animate-spin" /> : <Sparkle className="size-4" />}Hitung ulang
               </button>
             )}
             {kernScope === "smart" && (
               <div className="relative">
                 <button className="btn btn-accent !py-1.5" onClick={() => setAutoMenu((v) => !v)} disabled={autoBusy}
                   title="Auto-kern optikal SELURUH pasangan huruf & angka — pilih: isi yang kosong saja, atau timpa semua">
-                  {autoBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Auto-kern semua
+                  {autoBusy ? <CircleNotch className="size-4 animate-spin" /> : <Sparkle className="size-4" />}Auto-kern semua
                 </button>
                 {autoMenu && (
                   <div className="absolute top-full left-0 mt-1 z-50 rounded-xl border p-1 flex flex-col w-72 shadow-lg"
@@ -1843,7 +1843,7 @@ export function GlyphEditor({
             {kernScope === "class" && (
               <button className="btn !py-1.5" onClick={expandKernClasses} disabled={kernBusy}
                 title="Gabungkan varian aksen (Á,Â,Ä…) ke kelas huruf dasarnya → kern dasar otomatis berlaku utk aksen. Sekali jalan; mengubah groups + kerning.">
-                {kernBusy ? <Loader2 className="size-4 animate-spin" /> : <Combine className="size-4" />}Perluas kelas
+                {kernBusy ? <CircleNotch className="size-4 animate-spin" /> : <Unite className="size-4" />}Perluas kelas
               </button>
             )}
             {/* "Nolkan semua kerning" dipindah ke TopBar (samping kiri "Re-seed") — aksi font-wide global. */}
@@ -1872,7 +1872,7 @@ export function GlyphEditor({
             </label>
             <button className="btn btn-accent !py-1.5" onClick={runCleanup} disabled={cleanBusy}
               title="Hapus node/handle yang tidak dibutuhkan — bentuk karakter dipertahankan (dalam toleransi). ⌘Z membatalkan.">
-              {cleanBusy ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}Rapikan node
+              {cleanBusy ? <CircleNotch className="size-4 animate-spin" /> : <MagicWand className="size-4" />}Rapikan node
             </button>
             <span className="text-xs tabular-nums text-muted shrink-0">{contours.reduce((n, c) => n + c.length, 0)} titik</span>
             <span className="text-xs ml-auto whitespace-nowrap hidden lg:block" style={{ color: cleanMsg?.startsWith("Gagal") ? "#e5654b" : "var(--faint)" }}>
@@ -1888,10 +1888,10 @@ export function GlyphEditor({
               <input type="range" min={24} max={240} value={proofSize} onChange={(e) => setProofSize(Number(e.target.value))} className="w-28" />
             </label>
             <div className="flex items-center gap-0.5 shrink-0" title="Zoom kanvas (⌘/Ctrl + scroll juga bisa)">
-              <button className="btn !px-1.5 !py-1" onClick={() => setProofZoom((z) => zClamp(z / 1.25))}><ZoomOut className="size-3.5" /></button>
+              <button className="btn !px-1.5 !py-1" onClick={() => setProofZoom((z) => zClamp(z / 1.25))}><MagnifyingGlassMinus className="size-3.5" /></button>
               <button className="text-xs tabular-nums w-11 text-center text-muted hover:text-[var(--text)]" title="Reset zoom 100%"
                 onClick={() => setProofZoom(1)}>{Math.round(proofZoom * 100)}%</button>
-              <button className="btn !px-1.5 !py-1" onClick={() => setProofZoom((z) => zClamp(z * 1.25))}><ZoomIn className="size-3.5" /></button>
+              <button className="btn !px-1.5 !py-1" onClick={() => setProofZoom((z) => zClamp(z * 1.25))}><MagnifyingGlassPlus className="size-3.5" /></button>
             </div>
             <label className="flex items-center gap-1.5 shrink-0 text-xs" title="Terapkan kerning di pratinjau">
               <input type="checkbox" checked={proofKern} onChange={(e) => setProofKern(e.target.checked)} /> Kerning
@@ -1899,9 +1899,9 @@ export function GlyphEditor({
             <div className="flex items-center gap-1 shrink-0">
               <ProofToggle on={proofXray} onClick={() => setProofXray((v) => !v)} icon={Crosshair} label="X-Ray"
                 title="Rangka (outline) — KLIK karakter untuk pilih mana yg di-X-Ray (Shift = beberapa)" />
-              <ProofToggle on={proofNodes} onClick={() => setProofNodes((v) => !v)} icon={Spline} label="Node"
+              <ProofToggle on={proofNodes} onClick={() => setProofNodes((v) => !v)} icon={BezierCurve} label="Node"
                 title="Node & handle — KLIK karakter untuk pilih; seret node utk edit (Shift = beberapa)" />
-              <ProofToggle on={proofKernEdit} onClick={() => setProofKernEdit((v) => !v)} icon={ArrowLeftRight} label="Atur kern"
+              <ProofToggle on={proofKernEdit} onClick={() => setProofKernEdit((v) => !v)} icon={ArrowsLeftRight} label="Atur kern"
                 title="Seret sebuah glyph mendatar untuk mengatur kerning dengan glyph sebelumnya" />
             </div>
           </>

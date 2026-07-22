@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Kanban, Tags, Sparkles, Boxes, Loader2 } from "lucide-react";
+import { Kanban, Tag, Sparkle, Cube, CircleNotch } from "@phosphor-icons/react";
 import { api } from "../api";
 import { PREVIEW_FAMILY } from "../font";
 import type { KernListEntry, KernSide, ProjectState } from "../types";
@@ -34,9 +34,9 @@ export function SidePanels({
     <aside className="shrink-0 border-l flex flex-col" style={{ width: width ?? 320, borderColor: "var(--border)", background: "var(--bg-2)" }}>
       <div className="flex border-b" style={{ borderColor: "var(--border)" }}>
         <Tab active={tab === "kern"} onClick={() => setTab("kern")} icon={<Kanban className="size-4" />}>Kern</Tab>
-        <Tab active={tab === "feat"} onClick={() => setTab("feat")} icon={<Sparkles className="size-4" />}>Fitur</Tab>
-        <Tab active={tab === "vf"} onClick={() => setTab("vf")} icon={<Boxes className="size-4" />}>VF</Tab>
-        <Tab active={tab === "meta"} onClick={() => setTab("meta")} icon={<Tags className="size-4" />}>Meta</Tab>
+        <Tab active={tab === "feat"} onClick={() => setTab("feat")} icon={<Sparkle className="size-4" />}>Fitur</Tab>
+        <Tab active={tab === "vf"} onClick={() => setTab("vf")} icon={<Cube className="size-4" />}>VF</Tab>
+        <Tab active={tab === "meta"} onClick={() => setTab("meta")} icon={<Tag className="size-4" />}>Meta</Tab>
       </div>
       <div className="flex-1 overflow-auto p-4">
         {tab === "kern" && <KerningPanel project={project} selected={selected} fontV={fontV} tracking={tracking} />}
@@ -311,7 +311,7 @@ function KerningPanel({
 
       <div className="flex-1 min-h-0 overflow-auto -mx-1">
         {loading && !data ? (
-          <div className="grid place-items-center py-10 text-faint"><Loader2 className="size-5 animate-spin" /></div>
+          <div className="grid place-items-center py-10 text-faint"><CircleNotch className="size-5 animate-spin" /></div>
         ) : data && data.pairs.length ? (
           <ul className="flex flex-col">
             {data.pairs.map((p, i) => <KernRow key={i} p={p} />)}

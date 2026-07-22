@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { X, RotateCcw, Keyboard } from "lucide-react";
+import { X, ArrowCounterClockwise, Keyboard } from "@phosphor-icons/react";
 import {
   COMMANDS, bindingOf, isOverridden, setBinding, resetBinding, resetAll,
   comboFromEvent, isValidCombo, formatCombo, conflictFor, useKeymapVersion, type Command,
@@ -106,7 +106,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                         <span className="text-sm flex-1 min-w-0 truncate">{c.label}</span>
                         {isOverridden(c.id) && !capturing && (
                           <button className="btn !p-1" title="Kembalikan ke default" onClick={() => resetBinding(c.id)}>
-                            <RotateCcw className="size-3.5" />
+                            <ArrowCounterClockwise className="size-3.5" />
                           </button>
                         )}
                         {capturing ? (
@@ -150,7 +150,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
 
         <div className="flex items-center px-5 py-3 border-t" style={{ borderColor: "var(--border)" }}>
           <button className="btn" onClick={resetAll} title="Kembalikan semua pintasan ke default">
-            <RotateCcw className="size-4" /> Reset semua ke default
+            <ArrowCounterClockwise className="size-4" /> Reset semua ke default
           </button>
           <button className="btn btn-accent ml-auto" onClick={onClose}>Selesai</button>
         </div>

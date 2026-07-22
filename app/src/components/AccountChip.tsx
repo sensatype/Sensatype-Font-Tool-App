@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LogOut, ChevronDown } from "lucide-react";
+import { SignOut, CaretDown } from "@phosphor-icons/react";
 import { useAuth } from "./AuthGate";
 
 // Chip akun (avatar + nama + peran) dengan dropdown "Ganti akun". Dipakai di TopBar,
@@ -35,7 +35,7 @@ export function AccountChip() {
           <div className="text-xs font-medium truncate max-w-[140px]">{display}</div>
           {role && <div className="text-[10px] text-faint capitalize">{role}</div>}
         </div>
-        <ChevronDown className="size-3.5 text-faint shrink-0" />
+        <CaretDown className="size-3.5 text-faint shrink-0" />
       </button>
 
       {open && (
@@ -54,7 +54,7 @@ export function AccountChip() {
             onClick={() => { setOpen(false); logout(); }}
             className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm hover:bg-[var(--bg)] transition-colors"
           >
-            <LogOut className="size-4" /> Ganti akun
+            <SignOut className="size-4" /> Ganti akun
           </button>
         </div>
       )}

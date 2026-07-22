@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { Loader2, LogIn, ExternalLink, ShieldX } from "lucide-react";
+import { CircleNotch, SignIn, ArrowSquareOut, ShieldWarning } from "@phosphor-icons/react";
 import { authApi, focusApp, isElectron, openLoginUrl, type Session } from "../auth";
 import { setUnauthorizedHandler } from "../api";
 import logo from "../assets/logo.svg";
@@ -95,7 +95,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (phase.k === "loading" || phase.k === "callback")
     return (
       <Screen>
-        <Loader2 className="size-6 animate-spin text-muted" />
+        <CircleNotch className="size-6 animate-spin text-muted" />
         <p className="text-muted text-sm">{phase.k === "callback" ? "Menyelesaikan login…" : "Memuat…"}</p>
       </Screen>
     );
@@ -103,12 +103,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (phase.k === "waiting")
     return (
       <Screen>
-        <Loader2 className="size-6 animate-spin text-muted" />
+        <CircleNotch className="size-6 animate-spin text-muted" />
         <p className="text-muted text-sm max-w-xs text-center">
           Menunggu login di browser… Selesaikan kata sandi + OTP + PIN, lalu jendela ini akan lanjut sendiri.
         </p>
         <div className="flex gap-2">
-          <button className="btn" onClick={beginLogin}><ExternalLink className="size-4" /> Buka lagi</button>
+          <button className="btn" onClick={beginLogin}><ArrowSquareOut className="size-4" /> Buka lagi</button>
           <button className="btn" onClick={() => setPhase({ k: "anon" })}>Batal</button>
         </div>
       </Screen>
@@ -120,7 +120,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return (
         <Screen>
           <div className="size-12 rounded-2xl grid place-items-center text-white bg-red-500/90">
-            <ShieldX className="size-6" />
+            <ShieldWarning className="size-6" />
           </div>
           <h1 className="text-lg font-semibold">Akses ditolak</h1>
           <p className="text-muted text-sm max-w-xs text-center">
@@ -150,7 +150,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       </p>
       {phase.msg && <p className="text-xs text-red-500 max-w-xs text-center">{phase.msg}</p>}
       <button className="btn btn-accent" onClick={beginLogin}>
-        <LogIn className="size-4" /> Masuk dengan Sensatype
+        <SignIn className="size-4" /> Masuk dengan Sensatype
       </button>
     </Screen>
   );

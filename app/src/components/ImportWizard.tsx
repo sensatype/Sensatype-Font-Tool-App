@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Loader2, Trash2, Combine, Scissors, Eye, ArrowRight, ArrowLeft, Wand2, Eraser, Undo2, Redo2, Type, FolderOpen, Magnet, Check } from "lucide-react";
+import { UploadSimple, CircleNotch, Trash, Unite, Scissors, Eye, ArrowRight, ArrowLeft, MagicWand, Eraser, ArrowUUpLeft, ArrowUUpRight, TextT, FolderOpen, Magnet, Check } from "@phosphor-icons/react";
 import { api } from "../api";
 import { SpecimenCanvas } from "./SpecimenCanvas";
 import { AccountChip } from "./AccountChip";
@@ -180,8 +180,8 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
             style={{ borderStyle: "dashed", borderColor: drag ? "var(--accent)" : "var(--border-2)",
               background: drag ? "color-mix(in srgb, var(--accent) 10%, var(--panel))" : "var(--panel)", padding: "52px 24px" }}
           >
-            {busy ? <div className="flex flex-col items-center gap-3 text-muted"><Loader2 className="size-8 animate-spin" /><span>Mengurai specimen…</span></div>
-              : <div className="flex flex-col items-center gap-3"><Upload className="size-10 text-accent" />
+            {busy ? <div className="flex flex-col items-center gap-3 text-muted"><CircleNotch className="size-8 animate-spin" /><span>Mengurai specimen…</span></div>
+              : <div className="flex flex-col items-center gap-3"><UploadSimple className="size-10 text-accent" />
                   <div className="font-medium text-base">Jatuhkan 1 SVG / PDF specimen</div>
                   <div className="text-muted text-xs">SVG atau PDF vektor · semua glyph ditampilkan dulu untuk dibersihkan & dipetakan</div>
                   <div className="btn btn-accent mt-2">Pilih file</div></div>}
@@ -205,9 +205,9 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
           title="Bersihkan" sub={`${kept.length} glyph akan diimpor · ${staging?.shapes.length ?? 0} objek terdeteksi`} />
         <div className="px-4 py-2 border-b flex items-center gap-2 flex-wrap" style={{ borderColor: "var(--border)", background: "var(--bg-2)" }}>
           <span className="text-xs text-muted mr-1">{sel.size} dipilih</span>
-          <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("exclude", [...sel])} title={`Buang objek terpilih (${kc("delete")})`}><Trash2 className="size-4" />Buang</button>
+          <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("exclude", [...sel])} title={`Buang objek terpilih (${kc("delete")})`}><Trash className="size-4" />Buang</button>
           <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("include", [...sel])} title="Pulihkan objek yang dibuang"><Eye className="size-4" />Pulihkan</button>
-          <button className="btn !py-1.5" disabled={sel.size < 2} onClick={() => op("merge", [...sel])} title={`Gabungkan objek jadi satu (${kc("importMerge")})`}><Combine className="size-4" />Gabung</button>
+          <button className="btn !py-1.5" disabled={sel.size < 2} onClick={() => op("merge", [...sel])} title={`Gabungkan objek jadi satu (${kc("importMerge")})`}><Unite className="size-4" />Gabung</button>
           <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("split", [...sel])} title={`Pisahkan objek gabungan (${kc("importSplit")})`}><Scissors className="size-4" />Pisah</button>
           <button className="btn !py-1.5" onClick={() => setSnapOn((v) => !v)}
             style={{ background: snapOn ? "var(--accent)" : "transparent", color: snapOn ? "#fff" : "var(--muted)" }}
@@ -220,8 +220,8 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
           <button className="btn !py-1.5" onClick={() => addGuide("baseline")}><span style={{ color: "#ff5b6e" }}>―</span> Baseline</button>
           <button className="btn !py-1.5" onClick={() => addGuide("cap")}><span style={{ color: "#5b9cff" }}>―</span> Cap</button>
           <div className="h-5 w-px mx-1" style={{ background: "var(--border-2)" }} />
-          <button className="btn !py-1.5" disabled={!staging?.canUndo} onClick={undo} title={`Urungkan (${kc("undo")})`}><Undo2 className="size-4" /></button>
-          <button className="btn !py-1.5" disabled={!staging?.canRedo} onClick={redo} title={`Ulangi (${kc("redo")})`}><Redo2 className="size-4" /></button>
+          <button className="btn !py-1.5" disabled={!staging?.canUndo} onClick={undo} title={`Urungkan (${kc("undo")})`}><ArrowUUpLeft className="size-4" /></button>
+          <button className="btn !py-1.5" disabled={!staging?.canRedo} onClick={redo} title={`Ulangi (${kc("redo")})`}><ArrowUUpRight className="size-4" /></button>
           <span className="text-faint text-[11px] ml-auto"><b>Pilih semua</b> {kc("selectAll")} · <b>Gabung</b> {kc("importMerge")} · <b>Pisah</b> {kc("importSplit")} · <b>Buang</b> {kc("delete")}</span>
         </div>
         {staging && (
@@ -244,10 +244,10 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
     <div className="h-full flex flex-col relative">
       <WizardBar step={3}
         left={<button className="btn" onClick={() => setStep("clean")}><ArrowLeft className="size-4" />Bersihkan</button>}
-        right={<button className="btn btn-accent" disabled={busy} onClick={commit} title={`Impor & kompilasi font (${kc("importCommit")})`}>{busy ? <Loader2 className="size-4 animate-spin" /> : null}Import {kept.length} glyph</button>}
+        right={<button className="btn btn-accent" disabled={busy} onClick={commit} title={`Impor & kompilasi font (${kc("importCommit")})`}>{busy ? <CircleNotch className="size-4 animate-spin" /> : null}Import {kept.length} glyph</button>}
         title="Petakan glyph" sub="Token ke-i → glyph ke-i (urutan baca). Alt/liga tulis nama: Y.ss01, R_U, f_i" />
       <div className="px-4 py-2.5 border-b flex items-center gap-3 flex-wrap" style={{ borderColor: "var(--border)", background: "var(--bg-2)" }}>
-        <button className="btn !py-1.5" onClick={autoFill}><Wand2 className="size-4" />Otomatis (A–Z a–z 0–9 …)</button>
+        <button className="btn !py-1.5" onClick={autoFill}><MagicWand className="size-4" />Otomatis (A–Z a–z 0–9 …)</button>
         <button className="btn !py-1.5" onClick={clearTokens}><Eraser className="size-4" />Kosongkan (manual)</button>
         {/* Alt & Liga saat pemetaan: tombol "Terapkan" di dalam menu LANGSUNG mengisi token
             (onApply=autoFill) → tak perlu balik ke langkah Bersihkan agar terisi. */}
@@ -289,7 +289,7 @@ function CommitOverlay({ pct, phase, count }: { pct: number; phase: string; coun
     <div className="absolute inset-0 z-50 grid place-items-center" style={{ background: "color-mix(in srgb, var(--bg) 78%, transparent)", backdropFilter: "blur(2px)" }}>
       <div className="card p-6 w-[min(420px,90vw)] flex flex-col gap-3" style={{ boxShadow: "0 12px 40px rgba(0,0,0,.35)" }}>
         <div className="flex items-center gap-2">
-          <Loader2 className="size-5 animate-spin text-accent" />
+          <CircleNotch className="size-5 animate-spin text-accent" />
           <span className="font-semibold">Membangun font…</span>
           <span className="ml-auto tabular-nums text-lg font-semibold">{p}%</span>
         </div>
@@ -317,7 +317,7 @@ function AltLigMenu({ alt, setAlt, lig, setLig, onApply }: {
   return (
     <div className="relative">
       <button className="btn" onClick={() => setOpen((o) => !o)} title="Masukkan glyph Alternate & Ligature">
-        <Type className="size-4" /> Alt & Liga
+        <TextT className="size-4" /> Alt & Liga
         {filled && <span className="size-1.5 rounded-full bg-accent" />}
       </button>
       {open && (

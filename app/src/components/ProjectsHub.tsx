@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, Plus, Trash2, Loader2, Type, Pencil, Settings } from "lucide-react";
+import { FolderOpen, Plus, Trash, CircleNotch, TextT, Pencil, Gear } from "@phosphor-icons/react";
 import { api, type ProjectSummary } from "../api";
 import { AccountChip } from "./AccountChip";
 import { useSettings } from "./Settings";
@@ -97,7 +97,7 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
               <Plus className="size-4" /> Project baru
             </button>
             <button className="btn !p-1.5" onClick={settings.open} title="Pengaturan (⌘/Ctrl+,)">
-              <Settings className="size-4" />
+              <Gear className="size-4" />
             </button>
             {/* Akun (profil + nama) bisa diakses di luar project juga → ganti akun dari mana saja. */}
             <div className="h-5 w-px" style={{ background: "var(--border-2)" }} />
@@ -108,7 +108,7 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
         {err && <p className="text-red-500 text-sm mb-4">{err}</p>}
 
         {items === null ? (
-          <div className="grid place-items-center py-24 text-muted"><Loader2 className="size-6 animate-spin" /></div>
+          <div className="grid place-items-center py-24 text-muted"><CircleNotch className="size-6 animate-spin" /></div>
         ) : items.length === 0 ? (
           <div className="grid place-items-center py-24 text-center gap-3">
             <FolderOpen className="size-10 text-faint" />
@@ -127,7 +127,7 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
                 <div className="flex items-start gap-2.5">
                   <div className="size-9 rounded-lg grid place-items-center shrink-0"
                        style={{ background: "color-mix(in srgb, var(--accent) 16%, transparent)", color: "var(--accent)" }}>
-                    <Type className="size-4" />
+                    <TextT className="size-4" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="font-medium truncate">{p.family}</div>
@@ -151,7 +151,7 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
                         disabled={busyId === p.id}
                         className="text-faint hover:text-red-500 p-1"
                       >
-                        {busyId === p.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                        {busyId === p.id ? <CircleNotch className="size-4 animate-spin" /> : <Trash className="size-4" />}
                       </button>
                     </div>
                   )}
@@ -179,7 +179,7 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
             <button className="btn" onClick={() => setConfirmDel(null)}>Batal</button>
             <button className="btn" style={{ background: "#dc2626", color: "#fff", borderColor: "#dc2626" }}
                     onClick={doDelete}>
-              <Trash2 className="size-4" /> Hapus
+              <Trash className="size-4" /> Hapus
             </button>
           </div>
         </Modal>
