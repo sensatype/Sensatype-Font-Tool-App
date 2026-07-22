@@ -26,6 +26,57 @@ def _glyph_signature(g):
     return tuple(tuple((p.type or "off") for p in c) for c in g)
 
 
+def _unify_kern_groups(fonts, default):
+    """§9.7: kerning group WAJIB IDENTIK di semua master.
+
+    Grup kern diturunkan dari OUTLINE tiap master (kerning.build_kerning → _side_signature,
+    yang mengkuantisasi kedalaman sisi ke bucket upm*0.04). Master dgn bobot/lebar berbeda
+    bisa melewati batas bucket → PEMBAGIAN GRUP BERBEDA (mis. master A: kern1.D=[D,O,Q],
+    master B: kern1.D=[D] + kern1.O terpisah). Akibatnya fontmake gagal / kerning VF salah —
+    dan harmonize() dulu hanya menyamakan outline, tak pernah menyentuh groups.
+
+    Grup master DEFAULT dipakai sbg KANONIK; kerning master lain di-RE-KEY ke sana (kunci lama
+    diresolusi ke glyph wakil, lalu dipetakan ke grup kanonik). Nilai yang bertabrakan pada
+    kunci kanonik yang sama dirata-ratakan. Return jumlah master yang diseragamkan.
+    """
+    canon = {k: list(v) for k, v in default.groups.items() if k.startswith("public.kern")}
+    if not canon:
+        return 0
+    side1 = {g: k for k, ms in canon.items() if k.startswith("public.kern1.") for g in ms}
+    side2 = {g: k for k, ms in canon.items() if k.startswith("public.kern2.") for g in ms}
+
+    fixed = 0
+    for f in fonts:
+        if f is default:
+            continue
+        if {k: list(v) for k, v in f.groups.items() if k.startswith("public.kern")} == canon:
+            continue  # sudah identik
+
+        def canon_key(key, side_map):
+            """Kunci kerning bisa nama GRUP atau nama GLYPH. Hanya kunci GRUP yang di-re-key ke
+            grup kanonik; kunci level-glyph adalah EXCEPTION (scope='pair') yang sengaja lebih
+            spesifik dari kelas — dipromosikan ke kelas akan menghapus exception-nya."""
+            members = f.groups.get(key)
+            if members is None:
+                return key
+            return side_map.get(members[0], members[0])
+
+        merged = {}
+        for (L, R), v in dict(f.kerning).items():
+            merged.setdefault((canon_key(L, side1), canon_key(R, side2)), []).append(float(v))
+        f.kerning.clear()
+        for k, vals in merged.items():
+            # clamp ke rentang GPOS int16 (konsisten dgn project.set_kerning)
+            f.kerning[k] = max(-32767, min(32767, int(round(sum(vals) / len(vals)))))
+
+        for k in [k for k in f.groups if k.startswith("public.kern")]:
+            del f.groups[k]
+        for k, ms in canon.items():
+            f.groups[k] = list(ms)
+        fixed += 1
+    return fixed
+
+
 def harmonize(masters, default_value, out_dir):
     """Samakan master agar bisa di-VF: glyph yang struktur titiknya BEDA antar master
     dibuat STATIS (outline master default disalin ke semua master → delta nol, tak berinterpolasi).
@@ -55,6 +106,11 @@ def harmonize(masters, default_value, out_dir):
                 g.clearComponents()
                 src.draw(g.getPen())
                 g.width = src.width
+
+    # §9.7: selain outline, KERNING GROUP juga wajib identik antar-master (lihat docstring modul).
+    # Dikerjakan di sini karena harmonize() satu-satunya titik semua master bertemu sebelum
+    # designspace/fontmake — jadi project lama yang grupnya sudah terlanjur divergen ikut sembuh.
+    _unify_kern_groups([f for f, _, _ in fonts], default)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     harmonized = []
