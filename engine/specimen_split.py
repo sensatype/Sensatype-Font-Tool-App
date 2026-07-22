@@ -147,13 +147,26 @@ def extract_shapes(svg_file, *, cap_target=700):
     if not items:
         return {"shapes": [], "guides": [], "viewBox": [0, 0, 1, 1]}
     rows, _centers = _detect_rows(items, vb)
+    rows_ordered = [rows[ri] for ri in sorted(rows)]
+
+    # Cap-height SERAGAM dari huruf H (baris pertama) → jarak cap↔base sama di SEMUA baris.
+    # Penting bukan cuma kosmetik: commit memakai scale = cap_target/(baseline−cap) per baris,
+    # jadi jarak yang beda antar-baris membuat tiap baris ter-skala BERBEDA (huruf kecil dulu
+    # terukur dari asender → sedikit terlalu kecil; baris aksen jarak ~nol → skala meledak).
+    ref = _cap_reference(rows_ordered[0]) if rows_ordered else None
+    capH = ref[0] if ref and ref[0] > 0 else None
+    bases = _row_baselines(rows_ordered, capH) if capH else None
+
     shapes, guides = [], []
-    for band, ri in enumerate(sorted(rows)):
-        row = rows[ri]
-        base_row = _row_baseline(row)  # baseline mentah (median yMax glyph tinggi)
-        maxh = max(b[3] - b[1] for b, _ in row)
-        tall_tops = [b[1] for b, _ in row if (b[3] - b[1]) >= 0.55 * maxh]
-        cap_y = min(tall_tops) if tall_tops else min(b[1] for b, _ in row)
+    for band, row in enumerate(rows_ordered):
+        if bases:
+            base_row = bases[band]
+            cap_y = base_row - capH
+        else:  # specimen tak terbaca (tanpa baris acuan) → perilaku lama, per-baris
+            base_row = _row_baseline(row)
+            maxh = max(b[3] - b[1] for b, _ in row)
+            tall_tops = [b[1] for b, _ in row if (b[3] - b[1]) >= 0.55 * maxh]
+            cap_y = min(tall_tops) if tall_tops else min(b[1] for b, _ in row)
         guides.append({"y": round(base_row, 1), "type": "baseline"})
         guides.append({"y": round(cap_y, 1), "type": "cap"})
         for b, d in row:
@@ -191,6 +204,89 @@ def _row_baseline(group):
     maxh = max(heights) if heights else 0
     tall = [b[3] for b, _ in group if (b[3] - b[1]) >= 0.55 * maxh]
     return statistics.median(tall) if tall else statistics.median(b[3] for b, _ in group)
+
+
+def _cap_reference(row):
+    """Tinggi cap ACUAN dari baris pertama (A–Z), dipakai SERAGAM oleh semua baris.
+
+    Diambil dari glyph BERTUTUP RATA atas-bawah — ciri huruf H: tak punya overshoot, beda
+    dgn O/C/S/G yang sengaja sedikit melewati cap & baseline. Memakai min/max baris (perilaku
+    lama) berarti mengukur dari puncak overshoot → cap-height sedikit terlalu besar.
+
+    Urutan: (1) glyph ke-8 (= H pada A–Z) BILA lolos uji bertutup-rata; (2) glyph bertutup-rata
+    lain yg paling dekat ke kedua garis median (layout beda); (3) fallback POSISI ke-8 apa adanya.
+    Return (capH, baseline_glyph_acuan) atau None bila baris tak memadai."""
+    if not row:
+        return None
+    ordered = sorted(row, key=lambda t: (t[0][0] + t[0][2]) / 2)  # kiri → kanan
+    heights = [b[3] - b[1] for b, _ in ordered]
+    maxh = max(heights) if heights else 0
+    tall = [b for b, _ in ordered if (b[3] - b[1]) >= 0.55 * maxh]
+    if not tall:
+        return None
+    top = statistics.median(b[1] for b in tall)  # garis cap mayoritas (huruf bertutup rata)
+    bot = statistics.median(b[3] for b in tall)  # garis baseline mayoritas
+    if bot - top <= 0:
+        return None
+    tol = (bot - top) * 0.02  # 2% tinggi cap — cukup utk menyingkirkan overshoot
+
+    def flat(b):
+        return abs(b[1] - top) <= tol and abs(b[3] - bot) <= tol
+
+    if len(ordered) >= 8:
+        h = ordered[7][0]
+        if flat(h):
+            return h[3] - h[1], h[3]
+    cands = [b for b in tall if flat(b)]
+    if cands:
+        b = min(cands, key=lambda b: abs(b[1] - top) + abs(b[3] - bot))
+        return b[3] - b[1], b[3]
+    if len(ordered) >= 8:
+        h = ordered[7][0]
+        return h[3] - h[1], h[3]
+    return bot - top, bot
+
+
+def _row_baselines(rows_ordered, capH):
+    """Baseline tiap baris. Baris yang glyph tertingginya jauh di bawah capH tidak punya huruf
+    yang BERTUMPU baseline (mis. deretan tanda aksen ˘ˇ˜¨˚ yang semuanya melayang) → baselinenya
+    tak bisa diukur sendiri dan dulu menghasilkan jarak cap↔base ~nol (skala meledak saat commit).
+
+    Baris seperti itu diisi lewat REGRESI baseline terhadap POSISI TINTA baris (bukan terhadap
+    nomor baris): baris tak-terukur di UJUNG lembar hanya punya tetangga di satu sisi, dan
+    ekstrapolasi berbasis nomor baris bisa melesat jauh ke luar kanvas (teruji: baseline 1802
+    pada kanvas setinggi 1453 → garis hilang). Menambatkan ke pusat-tinta baris membuat hasilnya
+    selalu berada di tempat baris itu benar-benar digambar. Return list atau None."""
+    n = len(rows_ordered)
+    base = [None] * n
+    center = []
+    for i, row in enumerate(rows_ordered):
+        ys = [(b[1] + b[3]) / 2 for b, _ in row]
+        center.append(statistics.median(ys) if ys else 0.0)
+        maxh = max((b[3] - b[1]) for b, _ in row) if row else 0
+        if maxh >= 0.45 * capH:
+            base[i] = _row_baseline(row)
+    known = [i for i in range(n) if base[i] is not None]
+    if not known:
+        return None
+    if len(known) == 1:  # satu acuan → geser sejajar (jarak baseline↔pusat-tinta dianggap tetap)
+        off = base[known[0]] - center[known[0]]
+        for i in range(n):
+            if base[i] is None:
+                base[i] = center[i] + off
+        return base
+
+    xs = [center[i] for i in known]
+    ys = [base[i] for i in known]
+    mx = sum(xs) / len(xs)
+    my = sum(ys) / len(ys)
+    den = sum((x - mx) ** 2 for x in xs)
+    a = (sum((xs[j] - mx) * (ys[j] - my) for j in range(len(xs))) / den) if den else 1.0
+    b0 = my - a * mx
+    for i in range(n):
+        if base[i] is None:
+            base[i] = a * center[i] + b0
+    return base
 
 
 def _emit_row(row_items, cells, *, scale, base_row, baseY, upm, margin, out, seen, names):
