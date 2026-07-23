@@ -577,11 +577,11 @@ class Project:
         specimen_split.split(spec, out_dir, rows_spec=rows_spec, layout=lay)
 
     def _build_ufo_at(self, glyph_dir, ufo_path, family, style, preset, progress=None,
-                      fit_ink=False, zero_kern=False):
+                      fit_ink=False, zero_kern=False, edge_margin=None):
         svgs = sorted(Path(glyph_dir).glob("*.svg"))
         smoke_test.build_ufo(svgs, ufo_path, upm=1000, baseline_ratio=0.8,
                              family=family, style=style, autospace=True, kern=True, preset=preset,
-                             progress=progress)
+                             edge_margin=edge_margin, progress=progress)
         # Jalur IMPORT (pilihan user): mulai bersih agar mudah diatur —
         #   fit_ink  : batas kiri/kanan tiap glyph ke node terluar (LSB=RSB=0).
         #   zero_kern: SEMUA nilai kerning = 0 (grup/kelas bentuk TETAP → bisa diatur massal via "Kelas").
@@ -731,10 +731,14 @@ class Project:
         return len(written)
 
     @_locked
-    def respace(self, preset=None, keep_custom_kern=True):
+    def respace(self, preset=None, keep_custom_kern=True, edge_margin=None):
         meta = self._meta()
         if preset:
             meta["preset"] = preset
+        if edge_margin is not None:
+            # margin preset spasi-seragam, per-project (preset menyimpan bawaannya)
+            meta["edgeMargin"] = int(edge_margin)
+        if preset or edge_margin is not None:
             self._save_meta(meta)
         # ① SUMBER HARUS ADA. Tanpa ini, glyphs/ yang kosong membuat build_ufo menghasilkan font
         #    tanpa glyph — dan dulu font itu langsung menimpa project.ufo (kehilangan total).
@@ -750,7 +754,9 @@ class Project:
         tmp_ufo = self.root / "project_reseed.ufo"
         if tmp_ufo.exists():
             shutil.rmtree(tmp_ufo)
-        self._build_ufo_at(self.glyph_dir, tmp_ufo, meta["family"], meta["masters"][0]["name"], meta["preset"])
+        em = meta.get("edgeMargin")
+        self._build_ufo_at(self.glyph_dir, tmp_ufo, meta["family"], meta["masters"][0]["name"],
+                           meta["preset"], edge_margin=em)
         if self.ufo_path.exists():
             shutil.rmtree(self.ufo_path)
         tmp_ufo.rename(self.ufo_path)
@@ -762,7 +768,7 @@ class Project:
             tmp_m = dst.parent / (dst.name + ".reseed")
             if tmp_m.exists():
                 shutil.rmtree(tmp_m)
-            self._build_ufo_at(gdir, tmp_m, meta["family"], m["name"], meta["preset"])
+            self._build_ufo_at(gdir, tmp_m, meta["family"], m["name"], meta["preset"], edge_margin=em)
             if dst.exists():
                 shutil.rmtree(dst)
             tmp_m.rename(dst)
@@ -1525,6 +1531,12 @@ class Project:
             "variable": self._is_variable(meta),
             "staticGlyphs": self._static_glyphs if self._is_variable(meta) else [],
             "presets": list(presets_mod.load().get("presets", {}).keys()),
+            # preset bermode spasi-seragam + margin aktifnya → UI menampilkan field margin
+            # HANYA saat preset itu terpilih (di preset optikal, angkanya tak berarti apa-apa).
+            "edgePresets": [n for n, d in presets_mod.load().get("presets", {}).items()
+                            if presets_mod.spacing_mode(d) == "edge"],
+            "edgeMargin": int(meta.get("edgeMargin") or presets_mod.get_preset(
+                meta.get("preset"))[1].get("margin", 60)),
             "backup": self.backup_info(),  # cadangan Re-seed tersedia? → UI tawarkan "Batalkan"
             "version": self._version,
         }

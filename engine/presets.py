@@ -29,6 +29,23 @@ def get_preset(name=None, path=None):
     return name, presets[name]
 
 
+def spacing_mode(preset_data) -> str:
+    """"optical" (HTLS, bawaan) atau "edge" (margin tetap dari ujung ink kiri/kanan).
+
+    Mode "edge" memberi SEMUA glyph margin yang sama dari ujung inknya. Lebih mudah ditebak,
+    tapi beban pindah ke kerning: pada Yoruna, pasangan huruf yang butuh kerning naik 69%→88%
+    dan median |kern| 29→55 unit, karena selisih optik (O butuh ~20 unit lebih rapat dari H)
+    tak lagi ditangani spacing. Disediakan sbg pilihan sadar, bukan bawaan."""
+    return (preset_data or {}).get("spacing", "optical")
+
+
+def edge_margin(preset_data, upm=1000, override=None) -> int:
+    """Margin mode "edge" dlm unit font. Nilai preset ditulis pada skala upm 1000 lalu diskalakan.
+    `override` = nilai per-project (project.json → edgeMargin) bila pengguna menyetelnya."""
+    m = override if override is not None else (preset_data or {}).get("margin", 60)
+    return int(round(float(m) * (upm or 1000) / 1000.0))
+
+
 def category_of(codepoint) -> str:
     """Kategori kasar dari codepoint (cukup untuk pemilihan reference HTLS)."""
     if not codepoint:

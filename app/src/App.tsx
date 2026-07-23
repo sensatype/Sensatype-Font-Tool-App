@@ -127,14 +127,20 @@ export function App() {
         busy={busy}
         setBusy={setBusy}
         syncing={syncing}
-        onRespace={async (preset) => {
+        onRespace={async (preset, edgeMargin) => {
           // Re-seed = BANGUN ULANG UFO dari SVG (project.respace → _build_ufo_at, autospace+kern seed)
           // → SEMUA editan manual di level font tertimpa. Dipicu tombol "Re-seed" DAN dropdown Preset,
           // jadi konfirmasi ditaruh di sini (satu titik). Batal → select kembali sendiri (nilai terikat
           // ke project.preset yang tak berubah).
           const p = preset || project.preset || "display-serif";
+          const edge = (project.edgePresets ?? []).includes(p);
+          const m = edgeMargin ?? project.edgeMargin;
           if (!confirm(
             `Re-seed: bangun ulang font dari SVG dengan preset "${p}"?\n\n` +
+            (edge
+              ? `Mode spasi SERAGAM: setiap glyph dapat margin ${m} unit di kiri & kanan, ` +
+                "diukur dari ujung ink-nya sendiri.\n\n"
+              : "") +
             "Spasi & seed kerning dihitung ulang dari awal. Yang HILANG dan diganti hasil otomatis:\n" +
             "• Spasi / sidebearing (LSB & RSB)\n" +
             "• Editan outline (rapikan node / simplify) & anchor\n" +
@@ -145,7 +151,7 @@ export function App() {
             "klik \"Batalkan Re-seed\" untuk kembali.")) return;
           setBusy(true);
           try {
-            const st = await api.respace(p);
+            const st = await api.respace(p, true, edgeMargin);
             await applyState(st);
             setEditV((v) => v + 1); setFontV((v) => v + 1); // spacing SEMUA glyph berubah → segarkan editor & preview
             const r = st.respace;

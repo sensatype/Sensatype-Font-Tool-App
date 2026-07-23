@@ -205,11 +205,11 @@ export const api = {
       body: JSON.stringify(body),
     }).then(j<ProjectState>),
 
-  respace: (preset?: string, keepCustomKern = true) =>
+  respace: (preset?: string, keepCustomKern = true, edgeMargin?: number) =>
     fetch(`${BASE}/respace`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preset, keepCustomKern }),
+      body: JSON.stringify({ preset, keepCustomKern, edgeMargin }),
     }).then(j<ProjectState>),
 
   // Batalkan Re-seed terakhir (cadangan dibuat otomatis sesaat sebelum font dibangun ulang)

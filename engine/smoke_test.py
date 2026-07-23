@@ -169,7 +169,7 @@ def build_ufo(svg_files, ufo_path: FsPath, *, upm, baseline_ratio, family, style
               autospace=False, htls_area=400.0, htls_depth=15.0, htls_over=0.0,
               reference=None, xheight=None, preset=None, features=True,
               kern=False, kern_reference="n", kern_target=None, kern_deadband=8,
-              progress=None):
+              edge_margin=None, progress=None):
     def _p(frac, label):
         if progress:
             try: progress(frac, label)
@@ -253,6 +253,10 @@ def build_ufo(svg_files, ufo_path: FsPath, *, upm, baseline_ratio, family, style
             import presets
         xh = xheight if xheight else (font.info.xHeight or round(upm * 0.5))
         eng = htls.HTLS(upm=upm, xheight=xh, area=htls_area, depth=htls_depth, over=htls_over)
+        # Mode spasi preset: "optical" (HTLS) atau "edge" (margin tetap dari ujung ink).
+        import presets as _presets_mod
+        _mode = _presets_mod.spacing_mode(preset_data)
+        _margin = _presets_mod.edge_margin(preset_data, upm, edge_margin) if _mode == "edge" else None
         # cache reference contours per nama glyph
         ref_cache = {}
 
@@ -273,7 +277,11 @@ def build_ufo(svg_files, ufo_path: FsPath, *, upm, baseline_ratio, family, style
             b = g.getBounds(font)
             r["old_lsb"] = round(b.xMin) if b else 0
             r["old_rsb"] = round(g.width - b.xMax) if b else 0
-            sb = eng.sidebearings(g, reference_contours=_ref_contours_for(r))
+            if _margin is not None:
+                # margin SAMA kiri & kanan, diukur dari ujung ink glyph itu sendiri
+                sb = (_margin, _margin) if b else None
+            else:
+                sb = eng.sidebearings(g, reference_contours=_ref_contours_for(r))
             if sb is None:
                 r["new_lsb"] = r["new_rsb"] = None
                 continue

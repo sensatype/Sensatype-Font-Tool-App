@@ -41,6 +41,18 @@
         "lowercase": { "reference": "n" },
         "figures":   { "reference": "zero" }
       }
+    },
+    "edge-uniform": {
+      "label": "Spasi seragam dari ujung ink (margin tetap kiri & kanan)",
+      "spacing": "edge",
+      "margin": 60,
+      "htls": { "area": 380, "depth": 12, "over": 0 },
+      "kern": { "deadband": 8 },
+      "categories": {
+        "uppercase": { "reference": "H" },
+        "lowercase": { "reference": "n" },
+        "figures":   { "reference": "zero" }
+      }
     }
   }
 }

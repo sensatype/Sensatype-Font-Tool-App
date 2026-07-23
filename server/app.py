@@ -548,11 +548,13 @@ def metadata(body: dict):
 class Respace(BaseModel):
     preset: str | None = None
     keepCustomKern: bool = True  # pertahankan pasangan kern yang DITETAPKAN pengguna (bukan seed mesin)
+    edgeMargin: int | None = None  # margin preset spasi-seragam (unit em); None = pakai bawaan preset
 
 
 @app.post("/api/respace")
 def respace(body: Respace):
-    return project.respace(preset=body.preset, keep_custom_kern=body.keepCustomKern)
+    return project.respace(preset=body.preset, keep_custom_kern=body.keepCustomKern,
+                           edge_margin=body.edgeMargin)
 
 
 @app.post("/api/respace/undo")

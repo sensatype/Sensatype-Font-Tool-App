@@ -29,7 +29,7 @@ export function TopBar({
   busy: boolean;
   setBusy: (b: boolean) => void;
   syncing?: boolean;
-  onRespace: (preset: string) => void;
+  onRespace: (preset: string, edgeMargin?: number) => void;
   onUndoRespace: () => Promise<void> | void;
   onHome: () => void;
   onClearKern: () => Promise<void> | void;
@@ -112,6 +112,23 @@ export function TopBar({
             ))}
           </select>
         </label>
+        {/* Margin hanya muncul untuk preset bermode spasi-SERAGAM — di preset optikal angkanya
+            tak berarti apa-apa (sidebearing dihitung per bentuk). Enter = Re-seed dgn margin baru. */}
+        {(project.edgePresets ?? []).includes(project.preset ?? "") && (
+          <label className="flex items-center gap-1 text-xs text-muted"
+                 title="Margin kiri & kanan setiap glyph, diukur dari ujung ink-nya sendiri (unit em). Tekan Enter untuk Re-seed dengan nilai ini.">
+            Margin
+            <input type="number" className="field !py-1.5 !w-16 tabular-nums" disabled={busy}
+              defaultValue={project.edgeMargin ?? 60} key={project.edgeMargin}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                const v = Math.round(Number((e.target as HTMLInputElement).value));
+                if (Number.isFinite(v) && v >= 0 && v !== project.edgeMargin) {
+                  onRespace(project.preset ?? "edge-uniform", v);
+                }
+              }} />
+          </label>
+        )}
         <button className="btn" disabled={busy || clearing}
           title="Nolkan SEMUA nilai kerning (kelas kern/grup bentuk tetap ada → bisa diisi ulang lewat Smart → Auto-kern semua). Berlaku permanen ke seluruh font."
           onClick={async () => { if (clearing) return; setClearing(true); try { await onClearKern(); } finally { setClearing(false); } }}>
