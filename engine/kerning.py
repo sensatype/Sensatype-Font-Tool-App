@@ -18,16 +18,20 @@ Model optik v3 — "kenali kerangka tiap glyph, hasil seimbang" (tak terlalu rap
      Inilah beda "terlalu dekat/jauh" vs "seimbang": model lama tak bisa membedakan mulut-counter
      (jangan dirapatkan) dari flank-terbuka (rapatkan), sehingga c|o over-tusuk & T|a acak.
 
-  3. OPENNESS. Rata-rata terbobot-tengah dari celah TERISI (pusat zona berbobot penuh, tepi
-     meluruh) = seberapa "terbuka" pasangan secara perseptual.
-       kern = target − openness.
+  3. OPENNESS (soft-min). Rata-rata terbobot-tengah dari celah TERISI, dgn celah SEMPIT dibobot
+     lebih berat (rata-rata pangkat negatif, p=2) = seberapa "terbuka" pasangan secara perseptual.
+     Rata-rata biasa menganggap A·T terbuka karena segitiga di atas palang T luas, lalu menyuruh
+     menyusup sampai apex A nyaris menempel; mata justru membaca titik terdekat itu. Nilai kern
+     dicari lewat bagi-dua (soft-min tak linier thd kern) sehingga openness = target.
      target = openness pasangan referensi LURUS (median I|I, H|H, l|l, N|N, …) — DIUKUR DENGAN
      JALUR YANG SAMA → pasangan lurus (H|H) otomatis ~0 (tak "diperbaiki" sia-sia), dan skala
      mengikuti spacing font itu sendiri (gelap/terang, rapat/lega).
 
-  4. LANTAI ANTI-TABRAKAN. Kern negatif tak boleh membuat celah NYATA (bukan terisi) minimum
-     turun di bawah safe_frac×target → runcing/serif tak bersentuhan, dan tak pernah dipaksa
-     merenggang. Deadband membuang koreksi <~0.8% em (noise), clamp membatasi ekstrem.
+  4. LANTAI ANTI-TABRAKAN, DITURUNKAN DARI FONT. Kern negatif tak boleh membuat celah NYATA
+     minimum turun di bawah pinch_frac × IRAMA JEPIT font — yaitu seberapa dekat font itu sendiri
+     membiarkan huruf mendekat pada pasangan lurusnya (celah tersempit I|I, H|H, n|n; lihat
+     _flat_pinch). Bukan konstanta: font rapat dapat lantai rapat, font lega dapat lantai lega.
+     Deadband membuang koreksi <~0.8% em (noise), clamp membatasi ekstrem.
 
 Grouping (impor/seed): glyph dikelompokkan per BENTUK sisi (public.kern1/2.*), satu nilai kern
 per pasangan kelas (eksemplar) dipakai bersama anggotanya.
@@ -101,14 +105,47 @@ def _glyph_margins(contours, bounds, step, slope):
     return tab, bounds
 
 
-def _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step):
-    """Dari tabel margin L & R: (openness_terisi_terbobot, celah_nyata_min) di zona overlap.
-    (None, None) bila tak beririsan. openness = seberapa terbuka (perseptual); celah_nyata_min
-    = titik jepit fisik terdekat (utk lantai anti-tabrakan)."""
+# Eksponen soft-min untuk merata-ratakan celah. p=0 → rata-rata aritmetik (model lama);
+# p>0 → celah SEMPIT mendominasi (rata-rata pangkat negatif, sepupu rata-rata harmonik).
+#
+# Kenapa perlu: rata-rata aritmetik menganggap pasangan "cukup terbuka" selama TOTAL putihnya
+# banyak — tak peduli putih itu menumpuk di satu segitiga besar sementara di titik lain kedua
+# huruf nyaris bersentuhan. Pada A·T, T·A, A·S segitiga di atas palang T sangat luas, jadi
+# rata-rata aritmetik menyuruh menyusup dalam-dalam sampai apex A tinggal ~30 unit dari palang —
+# padahal pasangan lurus font ini tak pernah lebih dekat dari ~118 unit. Mata membaca titik
+# terdekat itu sebagai gelap/sesak, bukan rata-ratanya. p=2 membuat celah sempit membebani
+# hitungan sehingga tuck berhenti jauh lebih awal.
+#
+# Sifat penting: pada pasangan berprofil RATA (H|H, o|n, m|b) semua celah hampir sama besar,
+# jadi setiap nilai p memberi hasil identik — perubahan ini HANYA menyentuh pasangan berprofil
+# timpang, persis yang bermasalah. Target pun diukur dgn p yang sama (lihat _flat_target), jadi
+# skalanya tetap ikut font, bukan konstanta.
+_PNORM = 2.0
+
+
+def _soft_min_mean(ys, gaps, pnorm):
+    """Rata-rata terbobot-tengah dari `gaps`, dgn celah sempit dibobot lebih berat (pnorm>0)."""
+    yc = (ys[0] + ys[-1]) / 2.0
+    yh = max((ys[-1] - ys[0]) / 2.0, 1.0)
+    num = den = 0.0
+    for i, yy in enumerate(ys):
+        w = 1.0 / (1.0 + ((yy - yc) / yh) ** 2)   # bobot tengah (perseptual): pusat penuh, tepi luruh
+        den += w
+        if pnorm <= 0:
+            num += w * gaps[i]
+        else:
+            num += w * max(gaps[i], 1.0) ** (-pnorm)  # celah ≤0 dijepit ke 1 → tak meledak
+    if pnorm <= 0:
+        return num / den
+    return (num / den) ** (-1.0 / pnorm)
+
+
+def _pair_gaps(Ltab, Lb, Ladv, Rtab, Rb, step):
+    """Profil celah pasangan di zona overlap: (ys, celah_terisi, celah_nyata_min) atau None."""
     y0 = max(Lb[1], Rb[1])
     y1 = min(Lb[3], Rb[3])
     if y1 <= y0:
-        return None, None
+        return None
     ys, gapF, gapReal = [], [], []
     y = math.ceil(y0 / step) * step
     while y <= y1:
@@ -119,33 +156,56 @@ def _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step):
             gapReal.append((Ladv - l[0]) + r[2])  # celah NYATA (rawR L, rawL R)
         y += step
     if len(ys) < 2:
+        return None
+    return ys, gapF, min(gapReal)
+
+
+def _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step, pnorm=_PNORM):
+    """(openness_terisi, celah_nyata_min) — openness = seberapa terbuka pasangan secara
+    perseptual (soft-min, celah sempit dominan). (None, None) bila tak beririsan."""
+    pr = _pair_gaps(Ltab, Lb, Ladv, Rtab, Rb, step)
+    if pr is None:
         return None, None
-    yc = (ys[0] + ys[-1]) / 2.0
-    yh = max((ys[-1] - ys[0]) / 2.0, 1.0)
-    num = den = 0.0
-    for i, yy in enumerate(ys):
-        w = 1.0 / (1.0 + ((yy - yc) / yh) ** 2)   # bobot tengah (perseptual): pusat penuh, tepi luruh
-        num += w * gapF[i]; den += w
-    return num / den, min(gapReal)
+    ys, gapF, min_real = pr
+    return _soft_min_mean(ys, gapF, pnorm), min_real
 
 
-def _kern_from_openness(openness, min_real, target, upm, deadband, clamp_frac, safe_frac,
-                        strength=1.0):
-    """openness → nilai kern int. target = openness pasangan lurus acuan (rhythm datar font).
+def _solve_kern(ys, gapF, target, pnorm, lo, hi):
+    """k terkecil-galat sehingga openness(gapF + k) == target.
+
+    Dgn rata-rata aritmetik dulu ini punya rumus tertutup (k = target − openness) karena
+    mean(g+k) = mean(g)+k. Soft-min TIDAK linier terhadap k — menggeser semua celah sebesar k
+    menggeser soft-min-nya kurang dari k — jadi nilainya dicari lewat bagi-dua. openness naik
+    monoton thd k, sehingga bagi-dua selalu konvergen."""
+    if _soft_min_mean(ys, gapF, pnorm) >= target:      # sudah cukup/terlalu terbuka → hanya rapatkan
+        hi = min(hi, 0.0)
+    for _ in range(16):                                # 16 iterasi ≈ presisi 0,02 unit pd rentang 1 em
+        mid = (lo + hi) / 2.0
+        if _soft_min_mean(ys, [g + mid for g in gapF], pnorm) < target:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
+def _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap, strength=1.0,
+                       pnorm=_PNORM):
+    """Profil celah pasangan → nilai kern int.
+    target   = openness pasangan lurus acuan (rhythm datar font, ukuran yang SAMA).
+    floor_gap= celah nyata minimum yang boleh disisakan — DITURUNKAN dari font (lihat _flat_pinch).
     strength = faktor mode kerapatan (lihat MODES); 1.0 = sedang."""
-    if openness is None:
+    if pr is None:
         return 0
-    k = (target - openness) * strength
-    if k < 0:  # lantai: jaga celah nyata tersempit ≥ safe_frac×target; tak pernah paksa merenggang
-        k = max(k, min(0.0, safe_frac * target - min_real))
+    ys, gapF, min_real = pr
+    k = _solve_kern(ys, gapF, target, pnorm, -0.5 * upm, 0.5 * upm) * strength
+    if k < 0:  # lantai: jangan pernah menjepit lebih rapat dari irama jepit font itu sendiri
+        k = max(k, min(0.0, floor_gap - min_real))
     k = round(k)
     if abs(k) < deadband:
         return 0
-    # Clamp = rel korslet, BUKAN penjaga jarak. Yang menjaga huruf tak bertabrakan adalah LANTAI
-    # di atas (safe_frac × target), dan lantai itu sadar-bentuk. Clamp dulu 15% em — terlalu ketat:
-    # ia mengunci lebih dulu daripada lantai pada pasangan ekstrem (A·T butuh −212, cuma dapat
-    # −150 → tetap menganga 66 unit) tanpa menambah keamanan apa pun. Pada 22% em lantai yang
-    # mengambil alih: celah nyata berhenti tepat di 31 unit, dan jumlah tabrakan tak bergerak.
+    # Clamp = rel korslet, BUKAN penjaga jarak. Penjaga jarak adalah LANTAI di atas, dan lantai
+    # itu sadar-bentuk sekaligus sadar-font. Clamp dulu 15% em — terlalu ketat: ia mengunci lebih
+    # dulu daripada lantai pada pasangan ekstrem tanpa menambah keamanan apa pun.
     clamp = upm * clamp_frac
     return int(max(-clamp, min(clamp, k)))
 
@@ -173,6 +233,29 @@ def _flat_target(font, upm, step, slope):
     if cand:
         return statistics.median(cand)
     return upm * 0.16
+
+
+def _flat_pinch(font, upm, step, slope):
+    """IRAMA JEPIT font = seberapa dekat font ini membiarkan huruf saling mendekat pada pasangan
+    LURUS-nya sendiri (celah nyata tersempit I|I, H|H, n|n, …). Inilah "mengerti setiap font":
+    lantai anti-tabrakan tak lagi konstanta buatan (dulu 20% × target — pada Yoruna cuma 31 unit,
+    seperempat dari 118 unit yang jadi jarak terdekat font itu sendiri), melainkan pecahan dari
+    irama font yang bersangkutan. Font rapat dapat lantai rapat, font lega dapat lantai lega."""
+    cand = []
+    for r in _FLAT_REFS:
+        if r in font and len(font[r]) > 0:
+            p = _profiles(font[r])
+            if not p:
+                continue
+            tab, b = _glyph_margins(p[0], p[1], step, slope)
+            if not tab:
+                continue
+            _, mn = _pair_openness(tab, b, font[r].width, tab, b, step)
+            if mn is not None:
+                cand.append(mn)
+    if cand:
+        return statistics.median(cand)
+    return upm * 0.10
 
 
 def _deadband(upm):
@@ -240,8 +323,8 @@ def _side_signature(contours, b, side, samples, upm):
 
 
 def smart_pair(font, left, right, *, upm, step=10, slope=1.0, deadband=None,
-               clamp_frac=0.22, safe_frac=0.20, target=None, mode=None):
-    """Kern optikal SADAR-BENTUK untuk SATU pasangan (model v3: cone-fill + openness).
+               clamp_frac=0.22, pinch_frac=0.35, target=None, pinch=None, mode=None):
+    """Kern optikal SADAR-BENTUK untuk SATU pasangan (model v3: cone-fill + openness soft-min).
     mode = "tight"/"medium"/"loose" (lihat MODES); None = sedang.
     TIDAK menulis apa pun — hanya menghitung. Return int (0 bila tak ada data / dalam deadband)."""
     if left not in font or right not in font:
@@ -254,11 +337,13 @@ def smart_pair(font, left, right, *, upm, step=10, slope=1.0, deadband=None,
         deadband = _deadband(upm)
     if target is None:
         target = _flat_target(font, upm, step, slope)
+    if pinch is None:
+        pinch = _flat_pinch(font, upm, step, slope)
     Ltab, Lb = _glyph_margins(Lp[0], Lp[1], step, slope)
     Rtab, Rb = _glyph_margins(Rp[0], Rp[1], step, slope)
-    op, min_real = _pair_openness(Ltab, Lb, font[left].width, Rtab, Rb, step)
-    return _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac,
-                               strength_of(mode))
+    pr = _pair_gaps(Ltab, Lb, font[left].width, Rtab, Rb, step)
+    return _kern_from_profile(pr, target, upm, deadband, clamp_frac, pinch_frac * pinch,
+                              strength_of(mode))
 
 
 def flat_target(font, upm, step=10, slope=1.0):
@@ -268,7 +353,7 @@ def flat_target(font, upm, step=10, slope=1.0):
 
 
 def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
-                    clamp_frac=0.22, safe_frac=0.20, target=None, mode=None):
+                    clamp_frac=0.22, pinch_frac=0.35, target=None, pinch=None, mode=None):
     """Kern optikal SADAR-BENTUK (model v3) untuk SEMUA pasangan berurutan dari `names`. Return
     {(L,R): int} hanya utk |v|>=deadband. TIDAK menulis. Tabel margin per glyph (mentah + cone-fill
     45°) DIPRAKOMPUTASI SEKALI di grid-y bersama → tiap pasangan tinggal lookup+bobot, bukan scan
@@ -286,6 +371,8 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
     ns = [n for n in names if n in tables]
     if target is None:
         target = _flat_target(font, upm, step, slope)
+    if pinch is None:
+        pinch = _flat_pinch(font, upm, step, slope)
     # Kerapatan pilihan pengguna = SATU-SATUNYA pengatur seberapa rapat hasilnya (dulu ada dua:
     # mode + "belajar selera" tersembunyi — membingungkan & hasilnya sulit ditebak).
     strength = strength_of(mode)
@@ -295,16 +382,16 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
     # 0,08×target (≈1,2% em) supaya glyph tak pernah benar-benar bertabrakan.
     if strength > 1.0:
         clamp_frac = clamp_frac * strength
-        safe_frac = max(0.08, safe_frac / strength)
+        pinch_frac = max(0.15, pinch_frac / strength)
+    floor_gap = pinch_frac * pinch
     out = {}
     for L in ns:
         Ltab, Lb = tables[L]
         Ladv = font[L].width
         for R in ns:
             Rtab, Rb = tables[R]
-            op, min_real = _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step)
-            k = _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac,
-                                    strength)
+            pr = _pair_gaps(Ltab, Lb, Ladv, Rtab, Rb, step)
+            k = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap, strength)
             if k:
                 out[(L, R)] = k
     return out
@@ -312,7 +399,7 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
 
 def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
                   deadband=None, step=10, samples=10, slope=1.0,
-                  clamp_frac=0.22, safe_frac=0.20, mode=None):
+                  clamp_frac=0.22, pinch_frac=0.35, pinch=None, mode=None):
     """Hitung & tulis SEED kerning class-level ke `font` (dipakai saat impor). Grouping per bentuk
     sisi; nilai per pasangan-kelas memakai model optik v3 yang SAMA dgn Smart Kerning → seed sudah
     seimbang & konsisten dgn hasil tombol Smart. Return dict laporan."""
@@ -348,6 +435,10 @@ def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
     # --- target = rhythm datar font (median pasangan lurus), jalur ukur sama dgn pasangan ---
     if target is None:
         target = _flat_target(font, upm, step, slope)
+    # --- lantai jepit = pecahan irama font itu sendiri (bukan konstanta) ---
+    if pinch is None:
+        pinch = _flat_pinch(font, upm, step, slope)
+    floor_gap = pinch_frac * pinch
 
     # --- kern per pasangan kelas (eksemplar) ---
     pairs = {}
@@ -362,9 +453,9 @@ def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
             if Rname not in margins:
                 continue
             Rtab, Rb = margins[Rname]
-            op, min_real = _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step)
-            k = _kern_from_openness(op, min_real, target, upm, deadband, clamp_frac, safe_frac,
-                                    strength_of(mode))
+            pr = _pair_gaps(Ltab, Lb, Ladv, Rtab, Rb, step)
+            k = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap,
+                                   strength_of(mode))
             if k:
                 pairs[(g1name, g2name)] = k
 
