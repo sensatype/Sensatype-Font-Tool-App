@@ -140,24 +140,53 @@ def _soft_min_mean(ys, gaps, pnorm):
     return (num / den) ** (-1.0 / pnorm)
 
 
+# Ambang "irisan terlalu tipis": irisan vertikal harus menutupi setidaknya sekian bagian dari
+# glyph yang LEBIH TINGGI. Diukur thd yang lebih tinggi, bukan yang lebih pendek — kalau tidak,
+# underscore (tinggi ink 20 unit) akan lolos ambang berapa pun karena irisannya menutupi hampir
+# seluruh dirinya sendiri, padahal ia tak melihat 97% tinggi huruf di sebelahnya.
+_THIN_OVERLAP = 0.5
+
+
 def _pair_gaps(Ltab, Lb, Ladv, Rtab, Rb, step):
-    """Profil celah pasangan di zona overlap: (ys, celah_terisi, celah_nyata_min) atau None."""
+    """Profil celah pasangan: (ys, celah_terisi, celah_nyata_min) atau None.
+
+    Normalnya diukur pada irisan vertikal kedua glyph. Tapi bila irisan itu cuma seiris tipis —
+    underscore/tanda baca rendah/aksen lepas vs huruf penuh — jendela ukurnya jadi beberapa baris
+    saja dan hasilnya tak bermakna: <2 baris → kern 0 (pasangan menganga, mis. A·_ dan _·V),
+    tepat 2-3 baris → nilai liar dari sliver (mis. _·O dapat −151 tapi tetap renggang 197 unit).
+    Untuk kasus itu ukuran dipindah ke GABUNGAN rentang kedua glyph, dan di ketinggian tempat
+    sebuah glyph tak punya ink, margin-nya DIPEGANG pada baris terdekat miliknya (edge-hold) —
+    siluetnya dianggap berlanjut lurus. Dgn begitu putih di atas underscore ikut terhitung, persis
+    yang dilihat mata. Celah NYATA (utk lantai anti-tabrakan) tetap hanya dari baris tempat KEDUA
+    glyph benar-benar punya ink — di ketinggian lain mereka memang tak bisa bertabrakan."""
     y0 = max(Lb[1], Rb[1])
     y1 = min(Lb[3], Rb[3])
+    thin = (y1 - y0) < _THIN_OVERLAP * max(Lb[3] - Lb[1], Rb[3] - Rb[1])
+    if thin:
+        if not Ltab or not Rtab:
+            return None
+        y0 = min(Lb[1], Rb[1])
+        y1 = max(Lb[3], Rb[3])
+        Llo, Lhi = min(Ltab), max(Ltab)
+        Rlo, Rhi = min(Rtab), max(Rtab)
     if y1 <= y0:
         return None
     ys, gapF, gapReal = [], [], []
     y = math.ceil(y0 / step) * step
     while y <= y1:
         l = Ltab.get(y); r = Rtab.get(y)
-        if l and r:
+        lh = l if not thin else Ltab.get(min(max(y, Llo), Lhi))
+        rh = r if not thin else Rtab.get(min(max(y, Rlo), Rhi))
+        if lh and rh:
             ys.append(y)
-            gapF.append((Ladv - l[1]) + r[3])     # celah dari margin TERISI (filledR L, filledL R)
-            gapReal.append((Ladv - l[0]) + r[2])  # celah NYATA (rawR L, rawL R)
+            gapF.append((Ladv - lh[1]) + rh[3])       # celah dari margin TERISI (filledR L, filledL R)
+            if l and r:
+                gapReal.append((Ladv - l[0]) + r[2])  # celah NYATA (rawR L, rawL R) — hanya ink asli
         y += step
     if len(ys) < 2:
         return None
-    return ys, gapF, min(gapReal)
+    # tak ada baris ber-ink bersama → mustahil bertabrakan → lantai tak perlu mengikat
+    return ys, gapF, (min(gapReal) if gapReal else float("inf"))
 
 
 def _pair_openness(Ltab, Lb, Ladv, Rtab, Rb, step, pnorm=_PNORM):
@@ -440,7 +469,25 @@ def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
         pinch = _flat_pinch(font, upm, step, slope)
     floor_gap = pinch_frac * pinch
 
-    # --- kern per pasangan kelas (eksemplar) ---
+    # --- kern per pasangan kelas ---
+    # Bentuk (openness) diukur pada EKSEMPLAR kelas, tapi lantai anti-tabrakan diukur pada anggota
+    # PALING MENONJOL — anggota dgn sidebearing tersempit ke sisi yang berhadapan. Tanpa ini lantai
+    # cuma melindungi eksemplarnya: anggota lain yang inknya lebih menjorok ikut memakai nilai kelas
+    # itu dan bisa benar-benar bertabrakan (terukur pada braceright·less & braceright·plus).
+    def _tightest(members, side):
+        best, bestsb = members[0], None
+        for n in members:
+            if n not in margins:
+                continue
+            tab, b = margins[n]
+            sb = (font[n].width - b[2]) if side == "right" else b[0]   # RSB / LSB
+            if bestsb is None or sb < bestsb:
+                best, bestsb = n, sb
+        return best
+
+    tight1 = {g: _tightest(m, "right") for g, m in kern1_groups.items()}
+    tight2 = {g: _tightest(m, "left") for g, m in kern2_groups.items()}
+
     pairs = {}
     for g1name, m1 in kern1_groups.items():
         Lname = m1[0]
@@ -448,12 +495,20 @@ def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
             continue
         Ltab, Lb = margins[Lname]
         Ladv = font[Lname].width
+        Lt2 = margins.get(tight1[g1name])
         for g2name, m2 in kern2_groups.items():
             Rname = m2[0]
             if Rname not in margins:
                 continue
             Rtab, Rb = margins[Rname]
             pr = _pair_gaps(Ltab, Lb, Ladv, Rtab, Rb, step)
+            if pr is not None and Lt2 is not None:
+                Rt2 = margins.get(tight2[g2name])
+                if Rt2 is not None and (tight1[g1name] != Lname or tight2[g2name] != Rname):
+                    worst = _pair_gaps(Lt2[0], Lt2[1], font[tight1[g1name]].width,
+                                       Rt2[0], Rt2[1], step)
+                    if worst is not None and worst[2] < pr[2]:
+                        pr = (pr[0], pr[1], worst[2])   # pakai jepit anggota terburuk
             k = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap,
                                    strength_of(mode))
             if k:
