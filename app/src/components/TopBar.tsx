@@ -111,7 +111,7 @@ export function TopBar({
           </select>
         </label>
         <button className="btn" disabled={busy || clearing}
-          title="Nolkan SEMUA nilai kerning (kelas kern/grup bentuk tetap ada → bisa diatur massal lewat scope Kelas). Berlaku permanen ke seluruh font."
+          title="Nolkan SEMUA nilai kerning (kelas kern/grup bentuk tetap ada → bisa diisi ulang lewat Smart → Auto-kern semua). Berlaku permanen ke seluruh font."
           onClick={async () => { if (clearing) return; setClearing(true); try { await onClearKern(); } finally { setClearing(false); } }}>
           {clearing ? <CircleNotch className="size-4 animate-spin" /> : <Eraser className="size-4" />}
           Restart Kern

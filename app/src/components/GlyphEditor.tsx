@@ -124,7 +124,10 @@ export function GlyphEditor({
   const [kernSide, setKernSide] = useState<"left" | "right">("left"); // sisi glyph AKTIF dlm pasangan
   const [kernVal, setKernVal] = useState(0);
   const [kernInfo, setKernInfo] = useState<KernInfo | null>(null); // hasil resolusi (grup/exception)
-  const [kernScope, setKernScope] = useState<"all" | "class" | "pair" | "smart">("class"); // Semuanya(tracking)/Kelas/Pasangan/Smart
+  // Dua menu saja: "Spasi global" (tracking, seragam ke semua pasangan) & "Smart" (kern optikal
+  // per-pasangan). Level penyimpanan TIDAK lagi dipilih pengguna — Smart selalu menulis di level
+  // KELAS (menyebar ke se-grup; jatuh ke pasangan sendiri bila glyph tak berkelas, ditangani backend).
+  const [kernScope, setKernScope] = useState<"all" | "smart">("smart");
   const [smartBusy, setSmartBusy] = useState(false); // sedang menghitung saran smart kern
   // Kerapatan Smart Kerning (dekat/sedang/jauh) — tersimpan per-perangkat, sama spt keymap.
   const [kernMode, setKernMode] = useState<KernMode>(() => {
@@ -282,14 +285,14 @@ export function GlyphEditor({
   // nama kiri/kanan pasangan (tergantung sisi glyph aktif)
   const kernLeft = kernSide === "left" ? kernSelfName : kernPartnerName;
   const kernRight = kernSide === "left" ? kernPartnerName : kernSelfName;
-  // nilai kern utk scope aktif (pasangan → pairValue; class/smart → classValue sbg baseline)
-  const kernScoped = (k: KernInfo | null, scope: "all" | "class" | "pair" | "smart") =>
-    !k ? 0 : (scope === "pair" ? (k.pairValue ?? 0) : (k.classValue ?? 0));
+  // Nilai kern tersimpan utk pasangan ini. Exception pasangan (bila ada, mis. warisan versi lama)
+  // menang atas nilai kelas — sama spt urutan resolusi UFO §9.6, supaya angka di layar = yang dipakai.
+  const kernScoped = (k: KernInfo | null) => !k ? 0 : (k.pairValue ?? k.classValue ?? 0);
   // pasangan berganti → reset guard echo + buang nilai tertahan. Ref di-sync SINKRON:
   // efek smart di bawah berjalan pada commit yang sama & membaca ref ini — kalau hanya setState,
   // ref masih berisi dirty lama → computeSmart terlewat → saran smart tak pernah dihitung.
   useEffect(() => { pendingKern.current = null; kernDirtyRef.current = false; setKernDirty(false);
-    if (kernScopeRef.current === "all") setTrackVal(tracking); // scope "Semuanya": buang draft spasi yg belum diterapkan agar field tak menyesatkan (tampil "40" padahal belum tersimpan)
+    if (kernScopeRef.current === "all") setTrackVal(tracking); // menu "Spasi global": buang draft spasi yg belum diterapkan agar field tak menyesatkan (tampil "40" padahal belum tersimpan)
   }, [kernLeft, kernRight]); // eslint-disable-line react-hooks/exhaustive-deps
   // ambil info kern saat pasangan berubah — HANYA di mode Kerning (hemat: commit node/spasi
   // di mode lain tak perlu memicu fetch kern; masuk mode Kerning → fetch segar via dep `mode`)
@@ -297,7 +300,7 @@ export function GlyphEditor({
     if (mode !== "kerning") return;
     if (!kernLeft || !kernRight || !glyphNames.includes(kernLeft) || !glyphNames.includes(kernRight)) { setKernInfo(null); setKernVal(0); return; }
     let cancel = false;
-    api.getKerning(kernLeft, kernRight).then((k) => { if (!cancel) { setKernInfo(k); const sv = kernScoped(k, kernScopeRef.current);
+    api.getKerning(kernLeft, kernRight).then((k) => { if (!cancel) { setKernInfo(k); const sv = kernScoped(k);
       if (sv !== pendingKern.current && !kernDirtyRef.current) setKernVal(sv);        // nilai tertahan JANGAN ditimpa refetch
       else if (sv === pendingKern.current) pendingKern.current = null; } })            // echo tulisan sudah tiba → lepas guard (refetch berikut boleh masuk)
       .catch(() => { if (!cancel) { setKernInfo(null); setKernVal(0); } });
@@ -306,9 +309,9 @@ export function GlyphEditor({
   // ganti scope → nilai tertahan scope lama SELALU dibuang (sync ref: efek smart di bawah berjalan
   // pada commit yang sama & membacanya — tanpa ini, draft kelas/pasangan nyangkut sbg "saran Smart" palsu).
   useEffect(() => {
-    kernDirtyRef.current = false; setKernDirty(false); setTrackVal(tracking); // "Semuanya" tampil tracking tersimpan
+    kernDirtyRef.current = false; setKernDirty(false); setTrackVal(tracking); // "Spasi global" tampil tracking tersimpan
     if (kernScope === "smart") return; // saran dihitung efek smart di bawah
-    setKernVal(kernScoped(kernInfoRef.current, kernScope));
+    setKernVal(kernScoped(kernInfoRef.current));
   }, [kernScope]); // eslint-disable-line react-hooks/exhaustive-deps
   // SMART KERNING: hitung saran optikal (sadar-bentuk) dari outline pasangan → tahan sbg nilai
   // yang siap "Terapkan". Baseline diambil SEGAR (paralel) — kernInfoRef bisa masih milik pasangan lama.
@@ -325,12 +328,12 @@ export function GlyphEditor({
       // sebelum provenance tiba, lalu saran terlanjur menimpa nilai pengguna.
       if (!force && k.custom) {
         smartSettled.current.add(pairKey(kernLeft, kernRight));
-        setKernVal(kernScoped(k, "smart"));               // tampilkan NILAI ANDA
+        setKernVal(kernScoped(k));               // tampilkan NILAI ANDA
         kernDirtyRef.current = false; setKernDirty(false); // tak ada yang perlu "Terapkan"
         return;
       }
       setKernVal(r.value);
-      const dirty = r.value !== (k.classValue ?? 0);
+      const dirty = r.value !== kernScoped(k); // banding thd nilai yang BENAR-BENAR dipakai (exception menang atas kelas)
       kernDirtyRef.current = dirty; setKernDirty(dirty); // beda dari tersimpan → tawarkan "Terapkan"
     } catch { /* abaikan */ }
     finally { setSmartBusy(false); }
@@ -345,7 +348,7 @@ export function GlyphEditor({
     if (kernInfoRef.current?.custom
         && kernInfoRef.current.left === kernLeft && kernInfoRef.current.right === kernRight) {
       smartSettled.current.add(pairKey(kernLeft, kernRight)); // samakan penanda sesi dgn UFO
-      setKernVal(kernScoped(kernInfoRef.current, "smart"));   // tampilkan NILAI ANDA, bukan saran
+      setKernVal(kernScoped(kernInfoRef.current));   // tampilkan NILAI ANDA, bukan saran
       return;
     }
     computeSmart();
@@ -481,18 +484,18 @@ export function GlyphEditor({
     if (mode !== "kerning" && kernDirtyRef.current) {
       kernDirtyRef.current = false; setKernDirty(false); setTrackVal(tracking);
       pendingKern.current = null;
-      setKernVal(kernScoped(kernInfoRef.current, kernScopeRef.current));
+      setKernVal(kernScoped(kernInfoRef.current));
     }
   }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
   // STAGE: seret kanvas / ketik angka → pratinjau live + tandai "belum ditetapkan" (tak menulis apa pun)
   function stageKern(v: number) {
     if (kernScope === "all") { setTrackVal(v); setKernDirty(v !== tracking); return; }
-    setKernVal(v); setKernDirty(v !== kernScoped(kernInfoRef.current, kernScope));
+    setKernVal(v); setKernDirty(v !== kernScoped(kernInfoRef.current));
   }
-  // TERAPKAN: tulis nilai tertahan (tracking global / kern kelas / exception pasangan)
+  // TERAPKAN: tulis nilai tertahan (tracking global / kern pasangan di level kelas)
   function applyKern() {
     if (kernScope === "all") {
-      // "Semuanya" = tracking global ABSOLUT: berlaku ke SEMUA pasangan (live preview + bake export).
+      // "Spasi global" = tracking ABSOLUT: berlaku ke SEMUA pasangan (live preview + bake export).
       // Non-destruktif (tak mengubah kerning) & PERSISTEN (field tetap menunjukkan nilainya).
       onTracking?.(Math.round(trackVal)); setKernDirty(false); return;
     }
@@ -501,13 +504,17 @@ export function GlyphEditor({
   // BATAL: buang nilai tertahan, kembali ke nilai tersimpan
   function cancelKern() {
     if (kernScope === "all") setTrackVal(tracking); // kembali ke tracking tersimpan
-    else setKernVal(kernScoped(kernInfoRef.current, kernScope));
+    else setKernVal(kernScoped(kernInfoRef.current));
     setKernDirty(false);
   }
   function commitKern(v: number) {
-    if (!kernLeft || !kernRight || kernScope === "all") return; // "Semuanya" = tracking, bukan kern pasangan
+    if (!kernLeft || !kernRight || kernScope === "all") return; // "Spasi global" = tracking, bukan kern pasangan
     if (!glyphNames.includes(kernLeft) || !glyphNames.includes(kernRight)) return; // partner belum valid → jangan tulis
-    const writeScope = kernScope === "smart" ? "class" : kernScope; // Smart → ditulis di level kelas (menyebar ke se-grup)
+    // Tulis DI TEMPAT nilainya sekarang hidup: default level kelas (menyebar ke se-grup; backend
+    // jatuh ke pasangan bila glyph tak berkelas). Tapi bila pasangan ini punya exception — warisan
+    // versi lama yang MENANG atas nilai kelas (§9.6) — menulis ke kelas takkan mengubah apa pun dan
+    // pengguna melihat nilainya "balik lagi". Maka exception ditimpa di levelnya sendiri.
+    const writeScope = kernInfoRef.current?.pairValue != null ? "pair" : "class";
     smartSettled.current.add(pairKey(kernLeft, kernRight)); // nilai DITETAPKAN pengguna → saran tak boleh menimpanya
     setKernVal(v); pendingKern.current = v;                     // instan (JANGAN ditimpa respons/echo → tak lompat)
     const key = `${kernLeft} ${kernRight}`;
@@ -575,7 +582,7 @@ export function GlyphEditor({
     setKernBusy(true);
     try {
       await serial(() => api.expandKernGroups());
-      if (kernLeft && kernRight) { const k = await api.getKerning(kernLeft, kernRight); setKernInfo(k); kernInfoRef.current = k; setKernVal(kernScoped(k, kernScope)); }
+      if (kernLeft && kernRight) { const k = await api.getKerning(kernLeft, kernRight); setKernInfo(k); kernInfoRef.current = k; setKernVal(kernScoped(k)); }
       if (d) onChanged({ name: name!, unicode: d.unicode, char: d.char, advance: d.advance, lsb: d.lsb, rsb: d.rsb, contours: d.contours, category: d.category, empty: d.empty });
     } catch { /* gagal perluas → biarkan state lama (jangan unhandled rejection) */ }
     finally { setKernBusy(false); }
@@ -1838,26 +1845,25 @@ export function GlyphEditor({
                 onChange={(e) => setKernPartner(e.target.value)} placeholder="glyph" title="Glyph pasangan kerning — nama glyph atau satu karakter" />
               <GlyphNameList id="ge-glyphnames-k" names={glyphNames} />
             </label>
-            {/* satu field: "Semuanya"→tracking global · "Kelas"/"Pasangan"→kern pasangan.
+            {/* satu field: "Spasi global"→tracking seluruh font · "Smart"→kern pasangan terpilih.
                 Nilai DITAHAN dulu (amber = belum ditetapkan) → tulis saat "Terapkan". */}
             {kernScope === "all"
-              ? <Num label={kernDirty ? "Spasi semua*" : "Spasi semua"} value={trackVal} color={kernDirty ? "#e8a13a" : "var(--accent)"} onCommit={stageKern} title="Spasi global (em) — jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning. + renggang, − rapat. Nilai persisten; ikut export." />
-              : <Num label={(kernScope === "smart" ? "Smart" : "Kern") + (kernDirty ? "*" : "")} value={kernVal} color={kernDirty ? "#e8a13a" : "var(--good)"} onCommit={stageKern} title="Nilai kern (em); + renggang, − rapat. Smart = saran optikal dari bentuk. Klik Terapkan utk menyimpan." />}
-            {/* scope + nilai TERSIMPAN per level → jelas level mana yang punya nilai apa */}
-            {/* Label diperjelas krn dua hal ini BUKAN sesama "level kerning":
-                · "Spasi global" itu tracking (jarak seragam SEMUA pasangan), bukan kern pasangan.
-                · "Saran" itu SUMBER nilai (hitung optikal), bukan tempat penyimpanan — hasilnya
-                  disimpan di level Kelas. Hanya Kelas & Pasangan yang benar-benar level. */}
-            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Di mana nilai disimpan: Kelas = semua glyph se-grup · Pasangan = pasangan ini saja (exception). — Spasi global BUKAN kerning: itu jarak seragam ke semua pasangan (letter-spacing). Saran = hitung nilai optikal dari bentuk outline, hasilnya disimpan di level Kelas. Angka kecil = nilai tersimpan level itu.">
-              {(["all", "class", "pair", "smart"] as const).map((s) => {
-                const sv = s === "all" ? (tracking || null) : s === "class" ? kernInfo?.classValue ?? null : s === "pair" ? kernInfo?.pairValue ?? null : null;
-                const label = s === "all" ? "Spasi global" : s === "class" ? "Kelas" : s === "pair" ? "Pasangan" : "Saran";
+              ? <Num label={kernDirty ? "Spasi global*" : "Spasi global"} value={trackVal} color={kernDirty ? "#e8a13a" : "var(--accent)"} onCommit={stageKern} title="Spasi global (em) — jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning. + renggang, − rapat. Nilai persisten; ikut export." />
+              : <Num label={"Kern" + (kernDirty ? "*" : "")} value={kernVal} color={kernDirty ? "#e8a13a" : "var(--good)"} onCommit={stageKern} title="Nilai kern pasangan ini (em); + renggang, − rapat. Diisi saran optikal Smart, boleh Anda ubah. Klik Terapkan utk menyimpan." />}
+            {/* DUA menu saja — dua pekerjaan yang benar-benar berbeda:
+                · Spasi global = tracking, satu angka untuk SELURUH font.
+                · Smart        = kern satu pasangan, dihitung optikal dari bentuk.
+                Level penyimpanan (kelas/pasangan) tak lagi dipilih manual: Smart selalu menulis di
+                level kelas, jadi perbaikan Anda menyebar ke se-grup, bukan mati di satu pasangan. */}
+            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-2)" }} title="Spasi global = jarak seragam ke SEMUA pasangan (letter-spacing) — bukan kerning. · Smart = kern untuk pasangan terpilih, dihitung dari bentuk outline dan disimpan di level kelas (semua glyph se-grup ikut). Angka kecil = nilai tersimpan.">
+              {(["all", "smart"] as const).map((s) => {
+                const sv = s === "all" ? (tracking || null) : (kernScoped(kernInfo) || null);
                 return (
                   <button key={s} className="text-xs px-2 py-1 rounded-md font-medium flex items-center gap-1" onClick={() => setKernScope(s)}
                     style={{ background: kernScope === s ? "var(--accent)" : "transparent", color: kernScope === s ? "#fff" : "var(--muted)" }}>
-                    {s === "smart" && <Sparkle className="size-3" />}{label}
-                    {s === "smart"
-                      ? (kernScope === "smart" && smartBusy && <CircleNotch className="size-3 animate-spin" />)
+                    {s === "smart" && <Sparkle className="size-3" />}{s === "all" ? "Spasi global" : "Smart"}
+                    {s === "smart" && smartBusy
+                      ? <CircleNotch className="size-3 animate-spin" />
                       : (sv != null && <span className="tabular-nums text-[10px] opacity-75">{sv > 0 ? `+${sv}` : sv}</span>)}
                   </button>
                 );
@@ -1867,7 +1873,7 @@ export function GlyphEditor({
             {kernDirty && (
               <div className="flex items-center gap-1">
                 <button className="btn btn-accent !py-1.5" onClick={applyKern}
-                  title={kernScope === "all" ? "Tetapkan tracking global (tersimpan & ikut export)" : `Tetapkan nilai ${kernScope === "class" ? "level kelas (semua se-grup ikut)" : "exception pasangan ini"}`}>
+                  title={kernScope === "all" ? "Tetapkan spasi global (tersimpan & ikut export)" : "Tetapkan nilai kern — disimpan di level kelas, semua glyph se-grup ikut"}>
                   <Check className="size-4" />Terapkan
                 </button>
                 <button className="btn !py-1.5 !px-2" onClick={cancelKern} title="Batalkan — kembali ke nilai tersimpan">
@@ -1876,7 +1882,7 @@ export function GlyphEditor({
               </div>
             )}
             {/* Kerapatan: menskalakan KEKUATAN koreksi optik. Pasangan lurus (H|H) tetap 0 di semua
-                mode — untuk merenggangkan semua pasangan seragam, pakai scope "Semuanya". */}
+                mode — untuk merenggangkan semua pasangan seragam, pakai menu "Spasi global". */}
             {kernScope === "smart" && (
               <div className="flex gap-0.5 p-0.5 rounded-lg shrink-0" style={{ background: "var(--bg-2)" }}
                    title="Kerapatan saran Smart — hanya mengubah seberapa agresif pasangan terbuka/bulat dirapatkan. Pasangan lurus tetap 0.">
@@ -1924,35 +1930,33 @@ export function GlyphEditor({
                       <div className="font-medium" style={{ color: "#e8a13a" }}>Timpa semua</div>
                       <div className="text-faint mt-0.5">Hitung ulang optikal SEMUA pasangan — termasuk yang sudah diatur manual</div>
                     </button>
+                    {/* "Perluas kelas" dulu berdiri sendiri di tab "Kelas". Tab itu hilang, dan tempat
+                        yang benar memang di sini: sesama aksi sekali-jalan untuk SELURUH font. */}
+                    <div className="h-px my-1" style={{ background: "var(--border)" }} />
+                    <button className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[var(--bg)]" disabled={kernBusy}
+                      onClick={() => { setAutoMenu(false); expandKernClasses(); }}>
+                      <div className="font-medium flex items-center gap-1">
+                        {kernBusy ? <CircleNotch className="size-3 animate-spin" /> : <Unite className="size-3" />}Perluas kelas ke aksen
+                      </div>
+                      <div className="text-faint mt-0.5">Gabungkan Á,Â,Ä… ke kelas huruf dasarnya → kern huruf dasar otomatis berlaku untuk aksen</div>
+                    </button>
                   </div>
                 )}
               </div>
             )}
-            {/* "Perluas kelas" = operasi KELAS kern (gabung varian aksen ke kelas huruf dasar) →
-                hanya relevan di scope "Kelas", spt "Auto-kern semua" yang hanya di scope "Smart". */}
-            {kernScope === "class" && (
-              <button className="btn !py-1.5" onClick={expandKernClasses} disabled={kernBusy}
-                title="Gabungkan varian aksen (Á,Â,Ä…) ke kelas huruf dasarnya → kern dasar otomatis berlaku utk aksen. Sekali jalan; mengubah groups + kerning.">
-                {kernBusy ? <CircleNotch className="size-4 animate-spin" /> : <Unite className="size-4" />}Perluas kelas
-              </button>
-            )}
             {/* "Nolkan semua kerning" dipindah ke TopBar (samping kiri "Re-seed") — aksi font-wide global. */}
             <span className="text-xs ml-auto whitespace-nowrap hidden lg:block" style={{ color: kernDirty ? "#e8a13a" : "var(--faint)" }}>
-              {kernDirty
-                ? (kernScope === "smart"
-                  ? "Saran Smart siap — klik Terapkan (disimpan level kelas), atau ✕ batal"
-                  : "Nilai belum ditetapkan — klik Terapkan untuk menyimpan, atau ✕ untuk batal")
-                : kernScope === "smart"
-                ? (kernLeft && kernRight && smartSettled.current.has(`${kernLeft} ${kernRight}`)
-                  ? `Nilai Anda dipakai untuk ${kernLeft}·${kernRight} — sistem tidak akan menimpanya. Klik "Hitung ulang" bila ingin saran baru.`
-                  : `Smart = kern optikal dari bentuk outline · kerapatan ${(KERN_MODES.find((m) => m.id === kernMode)?.label ?? "Sedang").toLowerCase()}. Pilih pasangan → saran muncul.`)
-                : kernScope === "all"
-                ? "Spasi global → jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning · persisten & ikut export"
-                : kernScope === "class"
-                ? (kernInfo?.leftGroup || kernInfo?.rightGroup
-                  ? `Kelas ${(kernInfo?.leftGroup ?? kernLeft ?? "").replace("public.kern1.", "")} · ${(kernInfo?.rightGroup ?? kernRight ?? "").replace("public.kern2.", "")} → semua se-grup ikut`
-                  : "Glyph ini tak punya kelas → tersimpan sbg pasangan")
-                : `Pasangan ${kernLeft}·${kernRight} saja (exception)${kernInfo?.classValue != null ? ` · kelas=${kernInfo.classValue}` : ""}`}
+              {kernScope === "all"
+                ? (kernDirty
+                  ? "Spasi global belum ditetapkan — klik Terapkan untuk menyimpan, atau ✕ untuk batal"
+                  : "Spasi global → jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning · persisten & ikut export")
+                : kernDirty
+                ? "Saran Smart siap — klik Terapkan (menyebar ke semua glyph se-kelas), atau ✕ batal"
+                : kernLeft && kernRight && smartSettled.current.has(`${kernLeft} ${kernRight}`)
+                ? `Nilai Anda dipakai untuk ${kernLeft}·${kernRight} — sistem tidak akan menimpanya. Klik "Hitung ulang" bila ingin saran baru.`
+                : kernInfo?.leftGroup || kernInfo?.rightGroup
+                ? `Smart · kerapatan ${(KERN_MODES.find((m) => m.id === kernMode)?.label ?? "Sedang").toLowerCase()} → tersimpan di kelas ${(kernInfo?.leftGroup ?? kernLeft ?? "").replace("public.kern1.", "")} · ${(kernInfo?.rightGroup ?? kernRight ?? "").replace("public.kern2.", "")} (semua se-grup ikut)`
+                : `Smart = kern optikal dari bentuk outline · kerapatan ${(KERN_MODES.find((m) => m.id === kernMode)?.label ?? "Sedang").toLowerCase()}. Pilih pasangan → saran muncul.`}
             </span>
           </>
         ) : mode === "cleanup" ? (
