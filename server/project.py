@@ -650,19 +650,151 @@ class Project:
                                         family=meta.get("family", "Font"))
         return variable.compile_variable(ds, out_dir, cff2=cff2)  # dict {ttf, otf?}
 
-    # --- preset / respace --------------------------------------------------
+    # --- preset / Re-seed (respace) ----------------------------------------
+    # Re-seed MEMBANGUN ULANG UFO dari SVG: spacing preset + seed kerning kembali segar, tapi semua
+    # editan level-font hilang. Dulu operasi ini menulis LANGSUNG ke project.ufo tanpa jaring apa pun:
+    # tak ada cadangan, tak ada pemeriksaan sumber, dan crash di tengah build meninggalkan UFO rusak.
+    # Sekarang tiga pengaman itu ada — lihat komentar di masing-masing tahap.
+
+    @property
+    def backup_path(self):
+        return self.root / "_backup"
+
+    def backup_info(self):
+        """Metadata cadangan Re-seed terakhir (None bila tak ada) → UI bisa menawarkan "Batalkan"."""
+        stamp = self.backup_path / "_when.json"
+        if not (self.backup_path / "project.ufo").exists() or not stamp.exists():
+            return None
+        try:
+            return json.loads(stamp.read_text())
+        except (OSError, ValueError):
+            return None
+
+    def _make_backup(self, meta):
+        """Salin UFO (semua master) + project.json ke _backup/ SEBELUM dibangun ulang.
+        Preview/webfont sengaja tak ikut — itu turunan, di-compile ulang saat dipulihkan."""
+        b = self.backup_path
+        if b.exists():
+            shutil.rmtree(b)
+        b.mkdir(parents=True)
+        if self.ufo_path.exists():
+            shutil.copytree(self.ufo_path, b / "project.ufo")
+        for m in meta.get("masters", [])[1:]:
+            src = self.root / m["ufo"]
+            if src.exists():
+                dst = b / m["ufo"]
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src, dst)
+        (b / "project.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        (b / "_when.json").write_text(json.dumps({"at": int(time.time() * 1000), "op": "respace"}),
+                                      encoding="utf-8")
+
+    def _snapshot_custom_kern(self):
+        """Pasangan yang DITETAPKAN pengguna (provenance) + nilai efektifnya, sebagai kunci GLYPH.
+        Dicatat per-glyph, bukan per-kelas: rebuild bisa menyusun ulang kelas kern, dan kunci kelas
+        lama belum tentu masih ada. Nilai seed hasil mesin sengaja TIDAK ikut — itu memang yang
+        hendak dihitung ulang oleh Re-seed."""
+        if not self.ufo_path.exists():
+            return {}
+        font = ufoLib2.Font.open(self.ufo_path)
+        keys = self._custom_keys(font)
+        if not keys:
+            return {}
+        g1 = {g: n for n, ms in font.groups.items() if n.startswith("public.kern1.") for g in ms}
+        g2 = {g: n for n, ms in font.groups.items() if n.startswith("public.kern2.") for g in ms}
+        out = {}
+        for pk in keys:
+            parts = str(pk).split(" ")
+            if len(parts) != 2:
+                continue
+            v = self._resolve_kern(font, g1, g2, parts[0], parts[1])
+            if v:
+                out[pk] = v
+        return out
+
+    def _restore_custom_kern(self, kept):
+        """Tulis kembali pasangan pilihan pengguna sbg exception LEVEL PASANGAN — menang atas seed
+        kelas yang baru (§9.6), jadi selera pengguna bertahan tanpa mengunci pasangan lain."""
+        if not kept:
+            return 0
+        font = ufoLib2.Font.open(self.ufo_path)
+        written = []
+        for pk, v in kept.items():
+            left, right = pk.split(" ")
+            if left not in font or right not in font:
+                continue                       # glyph-nya hilang dari SVG → lewati, jangan bikin kunci yatim
+            font.kerning[(left, right)] = int(v)
+            written.append(pk)
+        if written:
+            font.lib[self.KERN_CUSTOM_LIB] = sorted(written)
+            font.save(self.ufo_path, overwrite=True)
+        return len(written)
+
     @_locked
-    def respace(self, preset=None):
+    def respace(self, preset=None, keep_custom_kern=True):
         meta = self._meta()
         if preset:
             meta["preset"] = preset
             self._save_meta(meta)
-        # re-seed semua master dari SVG-nya dgn preset baru
-        self._build_ufo_at(self.glyph_dir, self.ufo_path, meta["family"], meta["masters"][0]["name"], meta["preset"])
+        # ① SUMBER HARUS ADA. Tanpa ini, glyphs/ yang kosong membuat build_ufo menghasilkan font
+        #    tanpa glyph — dan dulu font itu langsung menimpa project.ufo (kehilangan total).
+        svgs = sorted(self.glyph_dir.glob("*.svg")) if self.glyph_dir.exists() else []
+        if not svgs:
+            raise ValueError("Project ini tak punya SVG sumber di glyphs/ — Re-seed dibatalkan "
+                             "supaya font yang ada tidak terhapus.")
+        # ② Selamatkan pilihan pengguna & buat titik pulih SEBELUM menyentuh apa pun.
+        kept = self._snapshot_custom_kern() if keep_custom_kern else {}
+        self._make_backup(meta)
+        # ③ Bangun ke UFO SEMENTARA lalu tukar — sama spt jalur import. Build gagal/crash di tengah
+        #    kini tak bisa merusak project.ufo yang sedang dipakai.
+        tmp_ufo = self.root / "project_reseed.ufo"
+        if tmp_ufo.exists():
+            shutil.rmtree(tmp_ufo)
+        self._build_ufo_at(self.glyph_dir, tmp_ufo, meta["family"], meta["masters"][0]["name"], meta["preset"])
+        if self.ufo_path.exists():
+            shutil.rmtree(self.ufo_path)
+        tmp_ufo.rename(self.ufo_path)
         for m in meta["masters"][1:]:
             gdir = (self.root / m["ufo"]).parent / "glyphs"
-            if gdir.exists():
-                self._build_ufo_at(gdir, self.root / m["ufo"], meta["family"], m["name"], meta["preset"])
+            if not gdir.exists() or not any(gdir.glob("*.svg")):
+                continue                        # master tanpa SVG → biarkan apa adanya, jangan dikosongkan
+            dst = self.root / m["ufo"]
+            tmp_m = dst.parent / (dst.name + ".reseed")
+            if tmp_m.exists():
+                shutil.rmtree(tmp_m)
+            self._build_ufo_at(gdir, tmp_m, meta["family"], m["name"], meta["preset"])
+            if dst.exists():
+                shutil.rmtree(dst)
+            tmp_m.rename(dst)
+        restored = self._restore_custom_kern(kept)
+        self.compile_preview()
+        st = self.state()
+        st["respace"] = {"glyphs": len(svgs), "keptKern": restored, "droppedKern": len(kept) - restored,
+                         "backup": True}
+        return st
+
+    @_locked
+    def restore_backup(self):
+        """Batalkan Re-seed: kembalikan UFO (semua master) + project.json dari _backup/.
+        Sekali pakai — cadangan dikonsumsi supaya tak ada kebingungan "versi mana yang aktif"."""
+        b = self.backup_path
+        if not (b / "project.ufo").exists():
+            raise ValueError("Tak ada cadangan Re-seed untuk dipulihkan.")
+        meta = json.loads((b / "project.json").read_text(encoding="utf-8"))
+        if self.ufo_path.exists():
+            shutil.rmtree(self.ufo_path)
+        shutil.copytree(b / "project.ufo", self.ufo_path)
+        for m in meta.get("masters", [])[1:]:
+            src = b / m["ufo"]
+            if not src.exists():
+                continue
+            dst = self.root / m["ufo"]
+            if dst.exists():
+                shutil.rmtree(dst)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dst)
+        self._save_meta(meta)
+        shutil.rmtree(b, ignore_errors=True)
         self.compile_preview()
         return self.state()
 
@@ -1393,6 +1525,7 @@ class Project:
             "variable": self._is_variable(meta),
             "staticGlyphs": self._static_glyphs if self._is_variable(meta) else [],
             "presets": list(presets_mod.load().get("presets", {}).keys()),
+            "backup": self.backup_info(),  # cadangan Re-seed tersedia? → UI tawarkan "Batalkan"
             "version": self._version,
         }
 

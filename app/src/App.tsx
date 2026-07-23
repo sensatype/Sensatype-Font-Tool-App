@@ -135,14 +135,44 @@ export function App() {
           const p = preset || project.preset || "display-serif";
           if (!confirm(
             `Re-seed: bangun ulang font dari SVG dengan preset "${p}"?\n\n` +
-            "PERINGATAN — kerja manual Anda akan HILANG dan diganti hasil otomatis:\n" +
-            "• Kerning manual (semua nilai)\n" +
+            "Spasi & seed kerning dihitung ulang dari awal. Yang HILANG dan diganti hasil otomatis:\n" +
             "• Spasi / sidebearing (LSB & RSB)\n" +
-            "• Editan outline (rapikan node / simplify) & anchor\n\n" +
-            "File SVG asli TIDAK berubah. Tindakan ini tidak bisa dibatalkan.")) return;
+            "• Editan outline (rapikan node / simplify) & anchor\n" +
+            "• Nilai kerning hasil auto-kern\n\n" +
+            "YANG DIPERTAHANKAN: pasangan kerning yang Anda tetapkan sendiri — ditulis ulang " +
+            "sebagai exception di atas seed yang baru.\n\n" +
+            "File SVG asli TIDAK berubah. Cadangan dibuat otomatis: bila hasilnya tak sesuai, " +
+            "klik \"Batalkan Re-seed\" untuk kembali.")) return;
           setBusy(true);
           try {
-            await applyState(await api.respace(p));
+            const st = await api.respace(p);
+            await applyState(st);
+            setEditV((v) => v + 1); setFontV((v) => v + 1); // spacing SEMUA glyph berubah → segarkan editor & preview
+            const r = st.respace;
+            if (r) alert(
+              `Re-seed selesai — ${r.glyphs} glyph dibangun ulang dengan preset "${p}".\n\n` +
+              (r.keptKern ? `${r.keptKern} pasangan kerning Anda dipertahankan.\n` : "Tak ada kerning kustom untuk dipertahankan.\n") +
+              (r.droppedKern ? `${r.droppedKern} dilewati (glyph-nya tak ada lagi).\n` : "") +
+              "\nHasilnya tak sesuai? Klik \"Batalkan Re-seed\" di bar atas.");
+          } catch (e) {
+            alert("Re-seed gagal: " + ((e as Error).message || e) + "\n\nFont Anda tidak berubah.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onUndoRespace={async () => {
+          if (!confirm(
+            "Batalkan Re-seed?\n\n" +
+            "Font dikembalikan ke kondisi sesaat sebelum Re-seed terakhir — spasi, kerning, dan " +
+            "editan outline Anda kembali seperti semula.\n\n" +
+            "Cadangan hanya menyimpan SATU langkah dan akan terpakai habis.")) return;
+          setBusy(true);
+          try {
+            await applyState(await api.undoRespace());
+            setEditV((v) => v + 1); setFontV((v) => v + 1);
+            alert("Re-seed dibatalkan — font kembali ke kondisi sebelumnya.");
+          } catch (e) {
+            alert("Batal Re-seed gagal: " + ((e as Error).message || e));
           } finally {
             setBusy(false);
           }

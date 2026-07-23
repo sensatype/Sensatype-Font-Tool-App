@@ -101,6 +101,8 @@ export interface ProjectState {
   masters?: Master[];
   variable?: boolean;
   presets?: string[];
+  backup?: { at: number; op: string } | null; // cadangan Re-seed tersedia → "Batalkan Re-seed"
+  respace?: { glyphs: number; keptKern: number; droppedKern: number; backup: boolean }; // hanya di respons Re-seed
   version?: number;
 }
 

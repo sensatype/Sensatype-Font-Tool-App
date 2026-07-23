@@ -205,12 +205,15 @@ export const api = {
       body: JSON.stringify(body),
     }).then(j<ProjectState>),
 
-  respace: (preset?: string) =>
+  respace: (preset?: string, keepCustomKern = true) =>
     fetch(`${BASE}/respace`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preset }),
+      body: JSON.stringify({ preset, keepCustomKern }),
     }).then(j<ProjectState>),
+
+  // Batalkan Re-seed terakhir (cadangan dibuat otomatis sesaat sebelum font dibangun ulang)
+  undoRespace: () => fetch(`${BASE}/respace/undo`, { method: "POST" }).then(j<ProjectState>),
 
   setAxis: (body: { tag: string; name: string; min: number; max: number; default: number }) =>
     fetch(`${BASE}/axis`, {

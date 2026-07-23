@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { DownloadSimple, ArrowsClockwise, FolderOpen, CircleNotch, Eraser, Gear } from "@phosphor-icons/react";
+import { DownloadSimple, ArrowsClockwise, ArrowCounterClockwise, FolderOpen, CircleNotch, Eraser, Gear } from "@phosphor-icons/react";
 import { api } from "../api";
 import { can } from "../auth";
 import { AccountChip } from "./AccountChip";
@@ -21,6 +21,7 @@ export function TopBar({
   setBusy,
   syncing = false,
   onRespace,
+  onUndoRespace,
   onHome,
   onClearKern,
 }: {
@@ -29,6 +30,7 @@ export function TopBar({
   setBusy: (b: boolean) => void;
   syncing?: boolean;
   onRespace: (preset: string) => void;
+  onUndoRespace: () => Promise<void> | void;
   onHome: () => void;
   onClearKern: () => Promise<void> | void;
 }) {
@@ -116,10 +118,21 @@ export function TopBar({
           {clearing ? <CircleNotch className="size-4 animate-spin" /> : <Eraser className="size-4" />}
           Restart Kern
         </button>
-        <button className="btn" disabled={busy} onClick={() => onRespace(project.preset ?? "display-serif")}>
+        <button className="btn" disabled={busy} onClick={() => onRespace(project.preset ?? "display-serif")}
+          title="Bangun ulang font dari SVG: spasi & seed kerning dihitung ulang dengan preset aktif. Pasangan kern yang Anda tetapkan sendiri dipertahankan; cadangan dibuat otomatis sehingga bisa dibatalkan.">
           {busy ? <CircleNotch className="size-4 animate-spin" /> : <ArrowsClockwise className="size-4" />}
           Re-seed
         </button>
+        {/* Muncul HANYA selama cadangan Re-seed masih ada → jalan pulang yang terlihat, bukan
+            janji di kotak dialog yang sudah keburu ditutup. */}
+        {project.backup && (
+          <button className="btn" disabled={busy} onClick={() => onUndoRespace()}
+            style={{ color: "#e8a13a" }}
+            title={`Kembalikan font ke kondisi sebelum Re-seed terakhir (${new Date(project.backup.at).toLocaleString("id-ID")}). Cadangan hanya satu langkah.`}>
+            <ArrowCounterClockwise className="size-4" />
+            Batalkan Re-seed
+          </button>
+        )}
         <button className="btn" onClick={onHome} title="Kembali ke daftar project">
           <FolderOpen className="size-4" /> Projects
         </button>

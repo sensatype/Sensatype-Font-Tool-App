@@ -547,11 +547,18 @@ def metadata(body: dict):
 
 class Respace(BaseModel):
     preset: str | None = None
+    keepCustomKern: bool = True  # pertahankan pasangan kern yang DITETAPKAN pengguna (bukan seed mesin)
 
 
 @app.post("/api/respace")
 def respace(body: Respace):
-    return project.respace(preset=body.preset)
+    return project.respace(preset=body.preset, keep_custom_kern=body.keepCustomKern)
+
+
+@app.post("/api/respace/undo")
+def respace_undo():
+    """Batalkan Re-seed terakhir — pulihkan UFO dari cadangan yang dibuat sesaat sebelumnya."""
+    return project.restore_backup()
 
 
 class Axis(BaseModel):
