@@ -141,6 +141,11 @@ def _kern_from_openness(openness, min_real, target, upm, deadband, clamp_frac, s
     k = round(k)
     if abs(k) < deadband:
         return 0
+    # Clamp = rel korslet, BUKAN penjaga jarak. Yang menjaga huruf tak bertabrakan adalah LANTAI
+    # di atas (safe_frac × target), dan lantai itu sadar-bentuk. Clamp dulu 15% em — terlalu ketat:
+    # ia mengunci lebih dulu daripada lantai pada pasangan ekstrem (A·T butuh −212, cuma dapat
+    # −150 → tetap menganga 66 unit) tanpa menambah keamanan apa pun. Pada 22% em lantai yang
+    # mengambil alih: celah nyata berhenti tepat di 31 unit, dan jumlah tabrakan tak bergerak.
     clamp = upm * clamp_frac
     return int(max(-clamp, min(clamp, k)))
 
@@ -198,10 +203,21 @@ def strength_of(mode):
 
 
 def _side_signature(contours, b, side, samples, upm):
-    """Tanda-tangan BENTUK satu sisi (kedalaman ink dari ekstrem), terlepas dari sidebearing."""
+    """Tanda-tangan BENTUK satu sisi (kedalaman ink dari ekstrem), terlepas dari sidebearing.
+
+    Tanda-tangan mencakup ZONA VERTIKAL, bukan hanya profil kedalaman. Sampel di bawah diambil
+    pada tinggi glyph yang DINORMALKAN (y berjalan minY→maxY), jadi profilnya buta terhadap
+    seberapa tinggi glyph itu sebenarnya: batang lurus setinggi cap (H) dan batang lurus setinggi
+    x (n) menghasilkan profil yang sama persis — keduanya nol semua. Akibatnya H dan n jatuh ke
+    kelas kern yang sama, padahal pasangan seperti V·H dan V·n butuh nilai yang jauh berbeda:
+    putih di bawah diagonal V berhenti di cap-height untuk H, tapi menganga sampai x-height untuk n.
+    Menyertakan zona (minY,maxY yang dibulatkan ke kelipatan 5% em) memisahkan cap / ascender /
+    x-height / descender tanpa memecah beda sepele seperti overshoot bulat.
+    """
     minY, maxY = b[1], b[3]
     if maxY <= minY:
         return ("flat",)
+    zone = (round(minY / (upm * 0.05)), round(maxY / (upm * 0.05)))
     # ekstrem sisi
     edges = []
     for i in range(samples):
@@ -220,11 +236,11 @@ def _side_signature(contours, b, side, samples, upm):
             return ("none",)
         extreme = min(vals)
         depth = [round(((mn if mn is not None else extreme) - extreme) / (upm * 0.04)) for mn, mx in edges]
-    return tuple(depth)
+    return zone + tuple(depth)
 
 
 def smart_pair(font, left, right, *, upm, step=10, slope=1.0, deadband=None,
-               clamp_frac=0.15, safe_frac=0.20, target=None, mode=None):
+               clamp_frac=0.22, safe_frac=0.20, target=None, mode=None):
     """Kern optikal SADAR-BENTUK untuk SATU pasangan (model v3: cone-fill + openness).
     mode = "tight"/"medium"/"loose" (lihat MODES); None = sedang.
     TIDAK menulis apa pun — hanya menghitung. Return int (0 bila tak ada data / dalam deadband)."""
@@ -252,7 +268,7 @@ def flat_target(font, upm, step=10, slope=1.0):
 
 
 def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
-                    clamp_frac=0.15, safe_frac=0.20, target=None, mode=None):
+                    clamp_frac=0.22, safe_frac=0.20, target=None, mode=None):
     """Kern optikal SADAR-BENTUK (model v3) untuk SEMUA pasangan berurutan dari `names`. Return
     {(L,R): int} hanya utk |v|>=deadband. TIDAK menulis. Tabel margin per glyph (mentah + cone-fill
     45°) DIPRAKOMPUTASI SEKALI di grid-y bersama → tiap pasangan tinggal lookup+bobot, bukan scan
@@ -296,7 +312,7 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
 
 def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
                   deadband=None, step=10, samples=10, slope=1.0,
-                  clamp_frac=0.15, safe_frac=0.20, mode=None):
+                  clamp_frac=0.22, safe_frac=0.20, mode=None):
     """Hitung & tulis SEED kerning class-level ke `font` (dipakai saat impor). Grouping per bentuk
     sisi; nilai per pasangan-kelas memakai model optik v3 yang SAMA dgn Smart Kerning → seed sudah
     seimbang & konsisten dgn hasil tombol Smart. Return dict laporan."""
