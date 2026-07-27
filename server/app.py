@@ -222,6 +222,14 @@ def fit_all():
         raise HTTPException(400, f"Rapatkan semua gagal: {e}")
 
 
+@app.get("/api/presets")
+def presets_list():
+    """Daftar preset + mana yang BAWAAN. Dipakai layar impor (project belum ada → /api/project
+    masih kosong), sehingga daftarnya tak perlu disalin ulang di frontend dan tak bisa tertinggal."""
+    import presets as _p
+    return {"presets": _p.names(), "default": _p.default_name()}
+
+
 @app.get("/api/layouts")
 def layouts():
     from server.project import ENGINE
@@ -236,7 +244,7 @@ async def import_specimen(
     rows: str = Form("upper,lower"),
     family: str = Form("Untitled"),
     style: str = Form("Regular"),
-    preset: str = Form("display-serif"),
+    preset: str | None = Form(None),
 ):
     data = await file.read()
     try:
@@ -251,7 +259,7 @@ async def import_glyphs(
     files: list[UploadFile] = File(...),
     family: str = Form("Untitled"),
     style: str = Form("Regular"),
-    preset: str = Form("display-serif"),
+    preset: str | None = Form(None),
 ):
     payload = [(f.filename, await f.read()) for f in files]
     try:
@@ -318,7 +326,7 @@ class Commit(BaseModel):
     tokens: list[str]
     family: str = "Untitled"
     style: str = "Regular"
-    preset: str = "display-serif"
+    preset: str | None = None
 
 
 @app.post("/api/import/commit")

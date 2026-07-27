@@ -248,7 +248,8 @@ class Project:
 
     @_locked
     def import_specimen(self, svg_bytes, *, layout=None, rows="upper,lower",
-                        family="Untitled", style="Regular", preset="display-serif"):
+                        family="Untitled", style="Regular", preset=None):
+        preset = preset or presets_mod.default_name()
         svg_bytes = _to_svg_bytes(svg_bytes)  # terima SVG atau PDF
         tmp = self._fresh_root()
         gdir = tmp / "glyphs"
@@ -266,8 +267,9 @@ class Project:
         return self.state()
 
     @_locked
-    def import_glyphs(self, files, *, family="Untitled", style="Regular", preset="display-serif", user_id=None):
+    def import_glyphs(self, files, *, family="Untitled", style="Regular", preset=None, user_id=None):
         """files = list of (filename, bytes). Tiap file = 1 glyph (nama file -> unicode)."""
+        preset = preset or presets_mod.default_name()   # satu sumber kebenaran: presets.json
         # validasi nama DULU (sebelum menulis apa pun): basename .svg saja → cegah path traversal
         for name, _ in files:
             safe = Path(str(name or "")).name
@@ -504,9 +506,10 @@ class Project:
         return self.staging_state()
 
     @_locked
-    def commit_import(self, tokens, *, family, style, preset, user_id=None):
+    def commit_import(self, tokens, *, family, style, preset=None, user_id=None):
         try:
-            return self._commit_import(tokens, family=family, style=style, preset=preset)
+            return self._commit_import(tokens, family=family, style=style,
+                                       preset=preset or presets_mod.default_name())
         except Exception as e:
             self._set_progress(0, "Gagal", active=False, error=str(e))
             raise
@@ -1789,7 +1792,8 @@ class Project:
             "masters": meta.get("masters", []),
             "variable": self._is_variable(meta),
             "staticGlyphs": self._static_glyphs if self._is_variable(meta) else [],
-            "presets": list(presets_mod.load().get("presets", {}).keys()),
+            "presets": presets_mod.names(),
+            "defaultPreset": presets_mod.default_name(),   # UI menandainya "disarankan"
             # preset bermode spasi-seragam + margin aktifnya → UI menampilkan field margin
             # HANYA saat preset itu terpilih (di preset optikal, angkanya tak berarti apa-apa).
             "edgePresets": [n for n, d in presets_mod.load().get("presets", {}).items()
@@ -1877,7 +1881,7 @@ class ProjectLibrary:
             d = self.root / pid
             d.mkdir(parents=True)
             (d / "project.json").write_text(json.dumps(
-                {"family": family, "style": style, "preset": "display-serif"}, indent=2))
+                {"family": family, "style": style, "preset": presets_mod.default_name()}, indent=2))
             self.open(pid)
             return pid
 

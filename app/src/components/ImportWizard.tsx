@@ -19,7 +19,18 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
   const [tokens, setTokens] = useState<Record<number, string>>({});
   const [family, setFamily] = useState("Yoruna");
   const [style, setStyle] = useState("Regular");
-  const [preset, setPreset] = useState("display-serif");
+  // Daftar preset DARI SERVER, bukan salinan di frontend. Salinan itu sempat tertinggal:
+  // "edge-uniform" ditambahkan ke presets.json tapi tak pernah muncul di layar ini.
+  const [preset, setPreset] = useState("");
+  const [presetList, setPresetList] = useState<string[]>([]);
+  const [defPreset, setDefPreset] = useState("");
+  useEffect(() => {
+    api.presets().then((r) => {
+      setPresetList(r.presets);
+      setDefPreset(r.default);
+      setPreset((cur) => cur || r.default);   // jangan timpa pilihan yang sudah diubah pengguna
+    }).catch(() => { /* server belum siap → biarkan kosong; commit tetap jalan (backend memakai default) */ });
+  }, []);
   const [altStr, setAltStr] = useState("");   // alternate (pisah koma) → disisipkan di urutan auto-fill
   const [ligStr, setLigStr] = useState("");   // ligature  (pisah koma)
   const [busy, setBusy] = useState(false);
@@ -278,7 +289,9 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
           <input className="field !w-32 !py-1.5" value={family} onChange={(e) => setFamily(e.target.value)} placeholder="Family" />
           <input className="field !w-24 !py-1.5" value={style} onChange={(e) => setStyle(e.target.value)} placeholder="Style" />
           <select className="field !w-auto !py-1.5" value={preset} onChange={(e) => setPreset(e.target.value)}>
-            {["display-serif", "text-serif", "text-sans", "display-sans"].map((p) => <option key={p}>{p}</option>)}
+            {presetList.map((p) => (
+              <option key={p} value={p}>{p === defPreset ? `${p} — disarankan` : p}</option>
+            ))}
           </select>
         </div>
       </div>

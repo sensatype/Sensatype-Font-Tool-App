@@ -108,7 +108,7 @@ export function TopBar({
             onChange={(e) => onRespace(e.target.value)}
           >
             {(project.presets ?? []).map((p) => (
-              <option key={p} value={p}>{p}</option>
+              <option key={p} value={p}>{p === project.defaultPreset ? `${p} — disarankan` : p}</option>
             ))}
           </select>
         </label>
@@ -135,7 +135,7 @@ export function TopBar({
           {clearing ? <CircleNotch className="size-4 animate-spin" /> : <Eraser className="size-4" />}
           Restart Kern
         </button>
-        <button className="btn" disabled={busy} onClick={() => onRespace(project.preset ?? "display-serif")}
+        <button className="btn" disabled={busy} onClick={() => onRespace(project.preset ?? project.defaultPreset ?? "display-serif")}
           title="Bangun ulang font dari SVG: spasi & seed kerning dihitung ulang dengan preset aktif. Pasangan kern yang Anda tetapkan sendiri dipertahankan; cadangan dibuat otomatis sehingga bisa dibatalkan.">
           {busy ? <CircleNotch className="size-4 animate-spin" /> : <ArrowsClockwise className="size-4" />}
           Re-seed

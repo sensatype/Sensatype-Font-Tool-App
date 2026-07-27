@@ -20,9 +20,29 @@ def load(path=None):
     return json.loads(FsPath(path or _PRESETS_PATH).read_text(encoding="utf-8"))
 
 
+def default_name(path=None):
+    """Nama preset BAWAAN — satu sumber kebenaran, dari presets.json.
+
+    Dulu nilai ini ditulis ulang secara hardcoded di tiga endpoint app.py dan sekali lagi di
+    layar impor, sehingga mengubah "default" di presets.json tak berpengaruh apa-apa dan daftar
+    di layar impor sempat tertinggal (edge-uniform tak pernah muncul di sana). Semua jalur kini
+    membaca dari sini."""
+    data = load(path)
+    presets = data.get("presets", {})
+    name = data.get("default")
+    if name in presets:
+        return name
+    return next(iter(presets), "display-serif")     # default rusak → preset pertama yang ada
+
+
+def names(path=None):
+    """Daftar nama preset, urut seperti di presets.json."""
+    return list(load(path).get("presets", {}).keys())
+
+
 def get_preset(name=None, path=None):
     data = load(path)
-    name = name or data.get("default")
+    name = name or default_name(path)
     presets = data.get("presets", {})
     if name not in presets:
         raise KeyError(f"Preset '{name}' tidak ada. Tersedia: {', '.join(presets)}")

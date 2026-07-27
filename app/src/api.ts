@@ -42,6 +42,9 @@ export const api = {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ family }),
     }).then(j<{ projects: ProjectSummary[]; active: string | null }>),
 
+  // Daftar preset + mana yang BAWAAN. Dipakai layar impor (project belum ada).
+  presets: () => fetch(`${BASE}/presets`).then(j<{ presets: string[]; default: string }>),
+
   layouts: () => fetch(`${BASE}/layouts`).then(j<{ layouts: string[] }>),
 
   importSpecimen: (form: FormData) =>
