@@ -579,8 +579,12 @@ class Project:
     def _build_ufo_at(self, glyph_dir, ufo_path, family, style, preset, progress=None,
                       fit_ink=False, zero_kern=False, edge_margin=None):
         svgs = sorted(Path(glyph_dir).glob("*.svg"))
+        # Seed kerning memakai kerapatan yang TERSIMPAN di project (bukan netral) → Re-seed tak lagi
+        # membuang selera pengguna. Pada project baru (belum ada meta) keduanya jatuh ke default.
+        meta = self._meta()          # project baru (belum ada meta) → {} → mode/ratio default
         smoke_test.build_ufo(svgs, ufo_path, upm=1000, baseline_ratio=0.8,
                              family=family, style=style, autospace=True, kern=True, preset=preset,
+                             kern_mode=self._kern_mode(meta), kern_ratio=self._kern_ratio(meta),
                              edge_margin=edge_margin, progress=progress)
         # Jalur IMPORT (pilihan user): mulai bersih agar mudah diatur —
         #   fit_ink  : batas kiri/kanan tiap glyph ke node terluar (LSB=RSB=0).
@@ -971,6 +975,91 @@ class Project:
                 "spacingFlat": bool(flat < 0.08 * upm), "flatTarget": round(flat),
                 "healthyTarget": round(0.15 * upm)}
 
+    def _kern_ratio(self, meta=None):
+        """Kerapatan pribadi tersimpan (pengali kekuatan koreksi optik). 1,0 = netral."""
+        m = meta if meta is not None else self._meta()
+        return kerning_mod.resolve_ratio(m.get("kernRatio"))
+
+    def _kern_mode(self, meta=None):
+        """Mode kerapatan (Dekat/Sedang/Jauh) yang TERAKHIR dipakai. Disimpan supaya seed Re-seed
+        memakai kekuatan yang sama dgn auto-kern terakhir — tanpa ini setiap Re-seed diam-diam
+        mengembalikan kerapatan ke 'Sedang'."""
+        m = meta if meta is not None else self._meta()
+        return kerning_mod.resolve_mode(m.get("kernMode"))
+
+    def kern_taste(self, mode=None):
+        """Ukur KERAPATAN PRIBADI dari pasangan yang Anda setel sendiri. Read-only.
+
+        Untuk tiap pasangan kustom: rasio = nilai Anda ÷ saran DASAR sistem (kekuatan mode, tanpa
+        kerapatan pribadi). MEDIAN dari rasio-rasio itulah selera yang bisa diterapkan ke seluruh
+        font — median, bukan rata-rata, supaya satu pasangan ekstrem tak menyeret semuanya.
+
+        Ikut dilaporkan model TAMBAH (median selisih) sebagai pembanding jujur: bila selisih lebih
+        pas menjelaskan edit Anda daripada rasio, yang Anda mau sebenarnya BUKAN kerning melainkan
+        Spasi global — dan UI harus mengatakan itu, bukan diam-diam memakai model yang salah.
+        Sebabnya: rasio mengalikan KOREKSI, dan koreksi pasangan lurus (H·H) nol → 0 × apa pun = 0.
+        """
+        font = self._font()
+        upm = font.info.unitsPerEm or 1000
+        g1, g2 = self._kern_groups(font)
+        mode = kerning_mod.resolve_mode(mode)
+        pairs = []
+        for k in sorted(self._custom_keys(font)):
+            p = k.split(" ")
+            if len(p) == 2 and p[0] in font and p[1] in font:
+                pairs.append((p[0], p[1]))
+        out = {"samples": len(pairs), "used": 0, "zeroBase": 0, "flipped": 0,
+               "ratio": None, "delta": None, "fit": None, "pairs": [],
+               "mode": mode, "current": self._kern_ratio()}
+        if not pairs:
+            return out
+        base = kerning_mod.baseline_pairs(font, pairs, upm=upm, mode=mode)
+        rows = []
+        for L, R in pairs:
+            b = base.get((L, R))
+            if b is None:
+                continue                      # glyph tanpa kontur → tak terukur
+            v = self._resolve_kern(font, g1, g2, L, R)
+            if b == 0:
+                out["zeroBase"] += 1          # saran nol → tak membawa informasi rasio
+                continue
+            r = v / b
+            if r <= 0:
+                out["flipped"] += 1           # tanda berlawanan → niat lain, bukan soal kerapatan
+                continue
+            rows.append({"left": L, "right": R, "value": v, "base": b, "ratio": round(r, 3)})
+        if not rows:
+            return out
+        med_r = statistics.median([x["ratio"] for x in rows])
+        med_d = statistics.median([x["value"] - x["base"] for x in rows])
+        # Sisa (median galat mutlak) tiap model → mana yang benar-benar menjelaskan kebiasaan Anda.
+        res_r = statistics.median([abs(x["value"] - x["base"] * med_r) for x in rows])
+        res_d = statistics.median([abs(x["value"] - (x["base"] + med_d)) for x in rows])
+        applied = kerning_mod.resolve_ratio(med_r)
+        out.update({
+            "used": len(rows),
+            "ratio": round(applied, 2),
+            "rawRatio": round(med_r, 3),
+            "clamped": abs(applied - med_r) > 0.005,   # selera di luar [0,2…3,0] → dijepit
+            "delta": round(med_d),
+            "residualRatio": round(res_r), "residualDelta": round(res_d),
+            # ambang 0,7: model TAMBAH harus jelas lebih baik, bukan sekadar beda derau
+            "fit": "delta" if res_d < res_r * 0.7 else "ratio",
+            "pairs": sorted(rows, key=lambda x: -abs(x["ratio"] - 1.0))[:20],
+        })
+        return out
+
+    @_locked
+    def set_kern_ratio(self, value, mode=None):
+        """Simpan kerapatan pribadi (+ mode yang menyertainya) di meta — TIDAK menyentuh UFO.
+        Dipakai oleh Smart, auto-kern, dan seed Re-seed, jadi selera bertahan antar-pembangunan."""
+        meta = self._meta()
+        meta["kernRatio"] = round(kerning_mod.resolve_ratio(value), 3)
+        if mode is not None:
+            meta["kernMode"] = kerning_mod.resolve_mode(mode)
+        self._save_meta(meta)
+        return self.state()
+
     def get_kern(self, left, right):
         font = self._font()
         g1, g2 = self._kern_groups(font)
@@ -1006,8 +1095,12 @@ class Project:
         if left not in font or right not in font:
             raise ValueError(f"Glyph tidak dikenal: {left!r} / {right!r}")
         upm = font.info.unitsPerEm or 1000
-        v = kerning_mod.smart_pair(font, left, right, upm=upm, mode=mode)
-        return {"left": left, "right": right, "value": int(v), "mode": kerning_mod.resolve_mode(mode)}
+        # Kerapatan pribadi ikut DI SINI juga — kalau tidak, saran di editor beda dari yang ditulis
+        # "Auto-kern semua", dan pengguna melihat dua angka berbeda untuk pasangan yang sama.
+        ratio = self._kern_ratio()
+        v = kerning_mod.smart_pair(font, left, right, upm=upm, mode=mode, ratio=ratio)
+        return {"left": left, "right": right, "value": int(v),
+                "mode": kerning_mod.resolve_mode(mode), "ratio": ratio}
 
     @_locked
     def shift_all_kerning(self, delta, recompile=False):
@@ -1041,13 +1134,23 @@ class Project:
         return {"cleared": n}
 
     @_locked
-    def auto_kern_all(self, only_empty=True, recompile=True, mode=None):
+    def auto_kern_all(self, only_empty=True, recompile=True, mode=None, ratio=None):
         """Auto-kern optikal SELURUH pasangan huruf & angka (ASCII, glyph-level).
         only_empty=True (default) → HANYA mengisi pasangan yang belum punya kerning apa pun
         (glyph maupun lewat grup) → kerning manual/kelas yang sudah ada TIDAK ditimpa (aman).
-        mode = 'tight'/'medium'/'loose' (kerapatan pilihan user; None = sedang)."""
+        mode = 'tight'/'medium'/'loose' (kerapatan pilihan user; None = sedang).
+        ratio = kerapatan pribadi; None = pakai yang tersimpan di project."""
         font = self._font()
         upm = font.info.unitsPerEm or 1000
+        # Mode & kerapatan yang dipakai DISIMPAN: seed Re-seed lalu memakai kekuatan yang sama,
+        # jadi membangun ulang font tak mengembalikan kerapatan ke netral.
+        meta = self._meta()
+        ratio = self._kern_ratio(meta) if ratio is None else kerning_mod.resolve_ratio(ratio)
+        cur_mode = kerning_mod.resolve_mode(mode)
+        if (meta.get("kernRatio") != round(ratio, 3)) or (meta.get("kernMode") != cur_mode):
+            meta["kernRatio"] = round(ratio, 3)
+            meta["kernMode"] = cur_mode
+            self._save_meta(meta)
         # Kandidat dibatasi ke huruf & angka ASCII (A–Z a–z 0–9) agar tak meledak (n²).
         # Varian aksen ikut lewat "Perluas kelas".
         names = []
@@ -1074,7 +1177,7 @@ class Project:
         # menyarankan Re-seed, bukan membiarkan pengguna menebak.
         flat = kerning_mod.flat_target(font, upm)
         spacing_flat = flat < 0.08 * upm
-        pairs = kerning_mod.auto_kern_pairs(font, names, upm=upm, mode=mode)
+        pairs = kerning_mod.auto_kern_pairs(font, names, upm=upm, mode=mode, ratio=ratio)
         written = skipped = preserved = 0
         done = set()
         for (L, R), v in pairs.items():
@@ -1117,7 +1220,7 @@ class Project:
             if recompile:
                 self.compile_static()
         return {"candidates": len(names), "computed": len(pairs), "written": written,
-                "skipped": skipped, "preserved": preserved, "mode": kerning_mod.resolve_mode(mode),
+                "skipped": skipped, "preserved": preserved, "mode": cur_mode, "ratio": ratio,
                 # spacing font ~0 → kerning mentok batas, hasil nyaris tak bergerak (sarankan Re-seed)
                 "spacingFlat": bool(spacing_flat), "flatTarget": round(flat)}
 
@@ -1521,6 +1624,9 @@ class Project:
             "upm": meta.get("upm", 1000),
             "preset": meta.get("preset"),
             "tracking": int(meta.get("tracking", 0)),  # spasi global (em); berlapis di atas kerning
+            # kerapatan pribadi: pengali kekuatan koreksi optik, dipakai Smart + auto-kern + seed
+            "kernRatio": self._kern_ratio(meta),
+            "kernMode": self._kern_mode(meta),
             "metadata": meta.get("metadata", {}),
             "glyphs": glyphs,
             "groups": groups,

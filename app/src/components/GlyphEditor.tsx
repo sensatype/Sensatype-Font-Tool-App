@@ -6,7 +6,7 @@ import { ArrowsOutCardinal, BezierCurve, Square, Circle, Trash, MagnifyingGlassP
 import { api } from "../api";
 import { commandFor, comboFromEvent, type CmdContext } from "../keymap";
 import { contoursToPath, addNode, removeNode, segClosest } from "../outline";
-import type { Anchor, ContourPoint, Glyph, GlyphComponent, GlyphDetail, GlyphRender, KernInfo, KernMode } from "../types";
+import type { Anchor, ContourPoint, Glyph, GlyphComponent, GlyphDetail, GlyphRender, KernInfo, KernMode, KernTaste } from "../types";
 import { KERN_MODES } from "../types";
 
 const ANCHOR_COLOR = "#e8a13a"; // warna penanda anchor (amber)
@@ -50,6 +50,7 @@ export function GlyphEditor({
   charToName = {},
   fontV = 0,
   tracking = 0,
+  kernRatio = 1,
   onTracking,
   onKern,
   onChanged,
@@ -60,6 +61,7 @@ export function GlyphEditor({
   charToName?: Record<string, string>;
   fontV?: number; // versi font (bump saat ada commit) → sinkron kern dgn panel samping
   tracking?: number; // spasi global (em)
+  kernRatio?: number; // kerapatan pribadi tersimpan (1 = netral) — ditampilkan di samping mode
   onTracking?: (v: number) => void;
   onKern?: () => void; // sinkron kern: bump editV (editor+panel refetch getKerning) + jadwalkan recompile webfont
   onChanged: (g: Glyph) => void;
@@ -141,6 +143,12 @@ export function GlyphEditor({
   const [kernReady, setKernReady] = useState<{ spacingFlat: boolean; count: number } | null>(null);
   const [autoBusy, setAutoBusy] = useState(false); // sedang menjalankan auto-kern seluruh font
   const [autoMenu, setAutoMenu] = useState(false); // menu pilihan auto-kern (isi kosong / timpa semua)
+  // KERAPATAN PRIBADI: hasil ukur dari pasangan yang disetel pengguna, ditampilkan SEBELUM
+  // diterapkan (angkanya bisa diubah) — supaya "ikut selera saya" bukan kotak hitam seperti
+  // mekanisme belajar lama yang dicabut karena hasilnya tak bisa ditebak.
+  const [taste, setTaste] = useState<KernTaste | null>(null); // panel terbuka bila ≠ null
+  const [tastePct, setTastePct] = useState(100);              // persen yang sedang disunting
+  const [tasteBusy, setTasteBusy] = useState(false);
   const [fitBusy, setFitBusy] = useState(false); // sedang merapatkan SEMUA glyph ke ink
   // mode Rapikan (bersihkan node/handle berlebih tanpa merusak bentuk)
   const [cleanBusy, setCleanBusy] = useState(false);
@@ -379,9 +387,12 @@ export function GlyphEditor({
   // AUTO-KERN SELURUH FONT: hitung + terapkan kern optikal utk semua pasangan huruf/angka.
   // Dua mode (pilihan user): onlyEmpty=true → hanya MENGISI yang belum diatur (aman);
   // onlyEmpty=false → TIMPA SEMUA (termasuk yang sudah diatur manual).
-  async function runAutoKernAll(onlyEmpty: boolean) {
+  async function runAutoKernAll(onlyEmpty: boolean, ratio?: number) {
     if (autoBusy) return;
     const modeLabel = KERN_MODES.find((m) => m.id === kernMode)?.label ?? "Sedang";
+    const rasio = ratio != null && Math.abs(ratio - 1) > 0.005
+      ? `\nKerapatan Anda: ${Math.round(ratio * 100)}% dari koreksi optik sistem.`
+      : "";
     // Beri tahu SEBELUM jalan: berapa pasangan kustom yang tercatat & apa akibatnya. Tanpa ini
     // "Timpa semua" jadi kotak hitam — pengguna mengira sistem mengabaikan seleranya, padahal
     // memang belum ada kustomisasi yang TERSIMPAN (menggeser saja tak cukup; harus Terapkan).
@@ -402,12 +413,12 @@ export function GlyphEditor({
       ? "\n\n⚠️ Ada nilai yang belum Anda Terapkan — nilai itu TIDAK ikut tersimpan."
       : "";
     const msg = onlyEmpty
-      ? `Auto-kern optikal pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah.${spasi}${pending}\n\nBisa memakan beberapa detik.`
-      : `Auto-kern optikal SEMUA pasangan huruf & angka?\n\nKerapatan: ${modeLabel} — ini yang menentukan rapat/longgarnya hasil.\n⚠️ Kerning yang belum Anda tetapkan akan DITIMPA.${lindung}${spasi}${pending}\n\nBisa memakan beberapa detik.`;
+      ? `Auto-kern optikal pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.${rasio}\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah.${spasi}${pending}\n\nBisa memakan beberapa detik.`
+      : `Auto-kern optikal SEMUA pasangan huruf & angka?\n\nKerapatan: ${modeLabel} — ini yang menentukan rapat/longgarnya hasil.${rasio}\n⚠️ Kerning yang belum Anda tetapkan akan DITIMPA.${lindung}${spasi}${pending}\n\nBisa memakan beberapa detik.`;
     if (!confirm(msg)) return;
     setAutoBusy(true);
     try {
-      const r = await serial(() => api.autoKernAll(onlyEmpty, kernMode));
+      const r = await serial(() => api.autoKernAll(onlyEmpty, kernMode, ratio));
       onKern?.(); // bump editV → panel & webfont menyusul
       // Laporkan apa yang DIPELAJARI dari kustomisasi — supaya jelas hasilnya mengikuti selera
       // pengguna, bukan diam-diam kembali ke rekomendasi sistem.
@@ -420,13 +431,49 @@ export function GlyphEditor({
           + "mentok batas di hampir semua pasangan.\nJalankan \"Re-seed\" untuk memberi jarak dasar, "
           + "lalu auto-kern lagi."
         : "";
-      alert(`Auto-kern selesai (kerapatan: ${modeLabel}):\n`
+      const rk = Math.abs((r.ratio ?? 1) - 1) > 0.005 ? ` · kerapatan Anda ${Math.round(r.ratio * 100)}%` : "";
+      alert(`Auto-kern selesai (kerapatan: ${modeLabel}${rk}):\n`
         + `${r.written} pasangan ditulis · ${r.skipped} dilewati\n`
         + `dari ${r.candidates} glyph huruf/angka.${lindung}${spasi}`);
     } catch (e) {
       alert("Auto-kern gagal: " + ((e as Error).message || e));
     } finally {
       setAutoBusy(false);
+    }
+  }
+  // UKUR kerapatan pribadi dari pasangan yang sudah disetel pengguna, lalu buka panelnya.
+  // Read-only — belum menulis apa pun; pengguna melihat & bisa mengubah angkanya dulu.
+  async function openTaste() {
+    if (tasteBusy) return;
+    setAutoMenu(false);
+    setTasteBusy(true);
+    try {
+      const t = await api.kernTaste(kernMode);
+      setTaste(t);
+      setTastePct(Math.round((t.ratio ?? t.current ?? 1) * 100));
+    } catch (e) {
+      alert("Gagal mengukur kerapatan: " + ((e as Error).message || e));
+    } finally {
+      setTasteBusy(false);
+    }
+  }
+  // Simpan kerapatan (dipakai Smart, auto-kern berikutnya, & seed Re-seed). `spread` → sekalian
+  // timpa seluruh font sekarang; tanpa itu hanya tersimpan dan berlaku pada hitungan berikutnya.
+  async function applyTaste(spread: boolean) {
+    const r = tastePct / 100;
+    if (!Number.isFinite(r) || r <= 0) { alert("Persentase harus angka lebih dari 0."); return; }
+    setTaste(null);
+    try {
+      const st = await api.setKernRatio(r, kernMode);
+      const eff = st.kernRatio ?? r;
+      if (Math.abs(eff - r) > 0.005) {
+        alert(`Kerapatan dijepit ke ${Math.round(eff * 100)}% (batas aman 20%–300%).`);
+      }
+      onKern?.();
+      if (spread) await runAutoKernAll(false, eff);
+      else recomputeSmart();
+    } catch (e) {
+      alert("Gagal menyimpan kerapatan: " + ((e as Error).message || e));
     }
   }
   // RAPATKAN SEMUA: sidebearing tiap glyph menempel ke node terluar (LSB=0, RSB=0). Font-wide →
@@ -1896,6 +1943,16 @@ export function GlyphEditor({
                 ))}
               </div>
             )}
+            {/* Kerapatan pribadi TIDAK boleh jadi setelan tak terlihat: selama ≠100% ia mengubah
+                setiap saran Smart & setiap seed Re-seed. Klik → buka panelnya utk ubah/kembalikan. */}
+            {kernScope === "smart" && Math.abs(kernRatio - 1) > 0.005 && (
+              <button className="text-[11px] px-2 py-1 rounded-md shrink-0 tabular-nums font-medium"
+                onClick={openTaste} disabled={tasteBusy}
+                style={{ background: "color-mix(in srgb, var(--accent) 18%, transparent)", color: "var(--accent)" }}
+                title={`Kerapatan Anda: ${Math.round(kernRatio * 100)}% dari koreksi optik sistem. Berlaku pada saran Smart, auto-kern, dan seed Re-seed. Klik untuk mengubah atau kembali ke 100%.`}>
+                ×{kernRatio.toFixed(2)}
+              </button>
+            )}
             {kernScope === "smart" && (
               <button className="btn !py-1.5" onClick={recomputeSmart} disabled={smartBusy}
                 title="Hitung ulang saran Smart untuk pasangan ini. Ini SATU-SATUNYA cara saran menimpa nilai yang sudah Anda tetapkan — di luar itu nilai Anda selalu dipertahankan.">
@@ -1917,8 +1974,10 @@ export function GlyphEditor({
                   title="Auto-kern optikal SELURUH pasangan huruf & angka — pilih: isi yang kosong saja, atau timpa semua">
                   {autoBusy ? <CircleNotch className="size-4 animate-spin" /> : <Sparkle className="size-4" />}Auto-kern semua
                 </button>
+                {/* Membuka KE ATAS: toolbar kerning duduk di dekat dasar jendela (di atasnya ada
+                    bar pratinjau), jadi popover yang turun ke bawah terpotong tepi layar. */}
                 {autoMenu && (
-                  <div className="absolute top-full left-0 mt-1 z-50 rounded-xl border p-1 flex flex-col w-72 shadow-lg"
+                  <div className="absolute bottom-full left-0 mb-1 z-50 rounded-xl border p-1 flex flex-col w-72 shadow-lg"
                        style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
                     <button className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[var(--bg)]"
                       onClick={() => { setAutoMenu(false); runAutoKernAll(true); }}>
@@ -1930,6 +1989,18 @@ export function GlyphEditor({
                       <div className="font-medium" style={{ color: "#e8a13a" }}>Timpa semua</div>
                       <div className="text-faint mt-0.5">Hitung ulang optikal SEMUA pasangan — termasuk yang sudah diatur manual</div>
                     </button>
+                    {/* Jawaban atas "sudah saya setel sendiri, kok tidak menular ke yang lain":
+                        "Timpa semua" biasa cuma MELINDUNGI pasangan Anda, tak pernah belajar darinya. */}
+                    <button className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[var(--bg)]" disabled={tasteBusy}
+                      onClick={openTaste}>
+                      <div className="font-medium flex items-center gap-1" style={{ color: "var(--accent)" }}>
+                        {tasteBusy ? <CircleNotch className="size-3 animate-spin" /> : <Sparkle className="size-3" />}
+                        Ikut kerapatan saya…
+                      </div>
+                      <div className="text-faint mt-0.5">
+                        Ukur seberapa rapat Anda menyetel sendiri (dalam %), lalu terapkan persentase itu ke semua pasangan
+                      </div>
+                    </button>
                     {/* "Perluas kelas" dulu berdiri sendiri di tab "Kelas". Tab itu hilang, dan tempat
                         yang benar memang di sini: sesama aksi sekali-jalan untuk SELURUH font. */}
                     <div className="h-px my-1" style={{ background: "var(--border)" }} />
@@ -1940,6 +2011,73 @@ export function GlyphEditor({
                       </div>
                       <div className="text-faint mt-0.5">Gabungkan Á,Â,Ä… ke kelas huruf dasarnya → kern huruf dasar otomatis berlaku untuk aksen</div>
                     </button>
+                  </div>
+                )}
+                {/* PANEL KERAPATAN — angka ditampilkan & bisa diubah SEBELUM menulis apa pun. */}
+                {taste && (
+                  <div className="absolute bottom-full left-0 mb-1 z-50 rounded-xl border p-3 flex flex-col gap-2 w-96 shadow-lg"
+                       style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
+                    <div className="text-xs font-medium flex items-center gap-1">
+                      <Sparkle className="size-3.5" style={{ color: "var(--accent)" }} />Kerapatan Anda
+                    </div>
+                    {taste.used > 0 ? (
+                      <>
+                        <div className="text-[11px] text-muted leading-relaxed">
+                          Dari <b>{taste.used}</b> pasangan yang Anda setel sendiri, rata-rata Anda memakai{" "}
+                          <b style={{ color: "var(--accent)" }}>{Math.round((taste.ratio ?? 1) * 100)}%</b> dari koreksi
+                          optik sistem.
+                          {taste.zeroBase > 0 && ` ${taste.zeroBase} pasangan tak ikut diukur (saran sistemnya nol).`}
+                          {taste.flipped > 0 && ` ${taste.flipped} berlawanan arah dgn saran → diabaikan.`}
+                        </div>
+                        <div className="text-[10px] text-faint tabular-nums flex flex-wrap gap-x-2.5 gap-y-0.5">
+                          {taste.pairs.slice(0, 6).map((p) => (
+                            <span key={`${p.left} ${p.right}`}>
+                              {p.left}·{p.right} {p.base}→{p.value}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-[11px] text-muted leading-relaxed">
+                        {taste.samples > 0
+                          ? `Ada ${taste.samples} pasangan yang Anda setel, tapi tak satu pun bisa dipakai mengukur persentase (saran sistemnya nol atau arahnya berlawanan). Isi angkanya sendiri di bawah.`
+                          : "Belum ada pasangan yang Anda setel sendiri. Setel beberapa dulu (ubah nilainya → Terapkan), lalu buka ini lagi — atau isi angkanya sendiri."}
+                      </div>
+                    )}
+                    {/* Peringatan jujur: kalau edit pengguna berpola "semua −X unit", persentase
+                        memang takkan menyembuhkannya — 0 × berapa pun tetap 0. */}
+                    {taste.fit === "delta" && (
+                      <div className="text-[11px] leading-relaxed px-2 py-1.5 rounded-lg"
+                           style={{ background: "color-mix(in srgb, #e8a13a 15%, transparent)", color: "#e8a13a" }}>
+                        Edit Anda lebih cocok pola <b>“semua {taste.delta! > 0 ? "+" : "−"}{Math.abs(taste.delta!)} unit”</b>{" "}
+                        daripada persentase. Itu pekerjaan <b>Spasi global</b>, bukan kerning — persentase
+                        mengalikan koreksi, jadi pasangan lurus (H·H, koreksinya nol) tetap tak bergerak.
+                      </div>
+                    )}
+                    <label className="flex items-center gap-2 text-xs">
+                      <span className="text-muted">Terapkan</span>
+                      <input type="number" className="field !py-1 !w-20 tabular-nums" min={20} max={300} step={5}
+                        value={tastePct} onChange={(e) => setTastePct(Number(e.target.value))}
+                        onKeyDown={(e) => { if (e.key === "Enter") applyTaste(true); }} />
+                      <span className="text-muted">% dari koreksi optik</span>
+                    </label>
+                    <div className="text-[10px] text-faint leading-relaxed">
+                      100% = rekomendasi sistem apa adanya. Di atas 100% = lebih rapat. Pasangan lurus tetap 0
+                      berapa pun angkanya; lantai anti-tabrakan tetap berlaku. Tersimpan di project → ikut
+                      dipakai saat Re-seed.
+                    </div>
+                    <div className="flex items-center gap-1.5 pt-0.5">
+                      <button className="btn btn-accent !py-1.5 !text-xs" onClick={() => applyTaste(true)}>
+                        <Check className="size-3.5" />Simpan & timpa semua
+                      </button>
+                      <button className="btn !py-1.5 !text-xs" onClick={() => applyTaste(false)}
+                        title="Simpan kerapatan tanpa menghitung ulang sekarang — berlaku pada saran Smart, auto-kern berikutnya, dan seed Re-seed.">
+                        Simpan saja
+                      </button>
+                      <button className="btn !py-1.5 !px-2" onClick={() => setTaste(null)} title="Batal">
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

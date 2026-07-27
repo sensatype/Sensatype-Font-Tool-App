@@ -31,6 +31,36 @@ export const KERN_MODES: { id: KernMode; label: string; hint: string }[] = [
   { id: "loose",  label: "Jauh",   hint: "Lebih longgar (×0,80) — koreksi optik ditahan" },
 ];
 
+// KERAPATAN PRIBADI: pengali kekuatan koreksi optik yang DIUKUR dari pasangan yang Anda setel
+// sendiri, lalu bisa diterapkan ke seluruh font. Berlapis di atas mode Dekat/Sedang/Jauh (yang
+// sebenarnya cuma tiga angka tetap pada knop yang sama: 1,20 / 1,00 / 0,80).
+// PENTING: rasio mengalikan KOREKSI, jadi pasangan lurus (H·H, koreksinya 0) tetap 0 — untuk
+// merenggangkan semuanya secara merata, alatnya "Spasi global", bukan ini. `fit` memberi tahu
+// model mana yang sebenarnya cocok dgn kebiasaan Anda.
+export interface KernTastePair {
+  left: string;
+  right: string;
+  value: number;   // nilai Anda
+  base: number;    // saran dasar sistem (tanpa kerapatan pribadi)
+  ratio: number;
+}
+export interface KernTaste {
+  samples: number;        // pasangan yang Anda setel sendiri
+  used: number;           // yang benar-benar bisa dipakai mengukur rasio
+  zeroBase: number;       // saran sistem 0 → tak membawa informasi rasio
+  flipped: number;        // tandanya berlawanan dgn saran → niat lain, bukan kerapatan
+  ratio: number | null;   // median rasio, sudah dijepit ke [0,2 … 3,0]
+  rawRatio?: number;
+  clamped?: boolean;
+  delta: number | null;   // median selisih (model pembanding)
+  residualRatio?: number;
+  residualDelta?: number;
+  fit: "ratio" | "delta" | null;  // "delta" → yang Anda mau sebenarnya Spasi global
+  pairs: KernTastePair[];
+  mode: KernMode;
+  current: number;        // kerapatan yang sedang tersimpan
+}
+
 // kerning ter-resolusi (level kelas/grup, §9.6)
 export interface KernInfo {
   left: string;
@@ -92,6 +122,8 @@ export interface ProjectState {
   upm?: number;
   preset?: string;
   tracking?: number; // spasi global (em), berlapis di atas kerning
+  kernRatio?: number;   // kerapatan pribadi (pengali koreksi optik); 1 = netral
+  kernMode?: KernMode;  // mode kerapatan terakhir — dipakai seed Re-seed agar konsisten
   metadata?: Record<string, string>;
   glyphs?: Glyph[];
   groups?: Record<string, string[]>;

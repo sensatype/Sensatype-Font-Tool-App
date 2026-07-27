@@ -1,4 +1,4 @@
-import type { ContourPoint, GlyphDetail, GlyphRender, KernInfo, KernListEntry, KernMode, KernPair, ProjectState, StagingState } from "./types";
+import type { ContourPoint, GlyphDetail, GlyphRender, KernInfo, KernListEntry, KernMode, KernPair, KernTaste, ProjectState, StagingState } from "./types";
 
 const BASE = "/api";
 
@@ -170,12 +170,26 @@ export const api = {
     .then(j<{ cleared: number }>),
 
   // Auto-kern optikal SELURUH pasangan huruf & angka. onlyEmpty → tak menimpa yang sudah ada.
-  autoKernAll: (onlyEmpty = true, mode: KernMode = "medium") =>
+  // ratio = kerapatan pribadi; dihilangkan → backend pakai yang tersimpan di project.
+  autoKernAll: (onlyEmpty = true, mode: KernMode = "medium", ratio?: number) =>
     fetch(`${BASE}/kerning/auto`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ onlyEmpty, recompile: false, mode }),
+      body: JSON.stringify({ onlyEmpty, recompile: false, mode, ratio }),
     }).then(j<{ candidates: number; computed: number; written: number; skipped: number;
-                preserved: number; mode: KernMode; spacingFlat: boolean; flatTarget: number }>),
+                preserved: number; mode: KernMode; ratio: number;
+                spacingFlat: boolean; flatTarget: number }>),
+
+  // Ukur KERAPATAN PRIBADI dari pasangan yang sudah Anda setel sendiri — read-only, tak menulis.
+  // Dipakai UI utk menampilkan angkanya SEBELUM diterapkan.
+  kernTaste: (mode: KernMode = "medium") =>
+    fetch(`${BASE}/kerning/taste?mode=${mode}`).then(j<KernTaste>),
+
+  // Simpan kerapatan pribadi (dipakai Smart, auto-kern, & seed Re-seed). Dijepit ke [0,2 … 3,0].
+  setKernRatio: (value: number, mode: KernMode = "medium") =>
+    fetch(`${BASE}/kerning/ratio`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value, mode }),
+    }).then(j<ProjectState>),
 
   setKerning: (body: { left: string; right: string; value: number; scope?: "class" | "pair"; recompile?: boolean }) =>
     fetch(`${BASE}/kerning`, {

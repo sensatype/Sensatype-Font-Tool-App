@@ -169,7 +169,7 @@ def build_ufo(svg_files, ufo_path: FsPath, *, upm, baseline_ratio, family, style
               autospace=False, htls_area=400.0, htls_depth=15.0, htls_over=0.0,
               reference=None, xheight=None, preset=None, features=True,
               kern=False, kern_reference="n", kern_target=None, kern_deadband=8,
-              edge_margin=None, progress=None):
+              kern_mode=None, kern_ratio=None, edge_margin=None, progress=None):
     def _p(frac, label):
         if progress:
             try: progress(frac, label)
@@ -298,7 +298,8 @@ def build_ufo(svg_files, ufo_path: FsPath, *, upm, baseline_ratio, family, style
         gnames = [r["glyph"] for r in report]
         kern_info = kerning.build_kerning(
             font, gnames, upm=upm, reference=kern_reference,
-            target=kern_target, deadband=kern_deadband)
+            target=kern_target, deadband=kern_deadband,
+            mode=kern_mode, ratio=kern_ratio)
 
     # Fitur OpenType (liga/alt/aalt) dari konvensi nama glyph (PRD D5: auto-generate).
     if features:

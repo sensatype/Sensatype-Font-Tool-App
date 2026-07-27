@@ -302,6 +302,13 @@ def _deadband(upm):
 MODES = {"tight": 1.20, "medium": 1.00, "loose": 0.80}
 DEFAULT_MODE = "medium"
 
+# Kerapatan PRIBADI: pengali kekuatan yang DIUKUR dari pasangan yang disetel pengguna sendiri
+# (lihat Project.kern_taste), berlapis di atas mode. Tiga tombol Dekat/Sedang/Jauh ternyata cuma
+# tiga angka tetap pada knop yang sama — ini menggantinya dgn angka milik pengguna.
+# Batas [0,2 … 3,0]: satu pasangan nyeleneh (mis. disetel +10 padahal saran −40) tak boleh bisa
+# melipatgandakan atau membalik seluruh font. Lantai anti-tabrakan tetap berlaku di atas ini.
+RATIO_MIN, RATIO_MAX = 0.2, 3.0
+
 
 def resolve_mode(mode):
     """Nama mode → nama KANONIK yang benar-benar dipakai (tak dikenal / None → default).
@@ -309,9 +316,39 @@ def resolve_mode(mode):
     return mode if mode in MODES else DEFAULT_MODE
 
 
-def strength_of(mode):
-    """Nama mode → faktor kekuatan. Nama tak dikenal / None → default (sedang)."""
-    return MODES[resolve_mode(mode)]
+def resolve_ratio(ratio):
+    """Kerapatan pribadi → nilai yang BENAR-BENAR dipakai (None/NaN/≤0 → 1,0; sisanya dijepit
+    ke [RATIO_MIN, RATIO_MAX]). Dipakai backend utk meng-echo angka yang sungguh diterapkan."""
+    try:
+        r = float(ratio)
+    except (TypeError, ValueError):
+        return 1.0
+    if not math.isfinite(r) or r <= 0:
+        return 1.0
+    return max(RATIO_MIN, min(RATIO_MAX, r))
+
+
+def strength_of(mode, ratio=None):
+    """Mode + kerapatan pribadi → faktor kekuatan koreksi optik.
+    Keduanya mengalikan knop yang SAMA: mode = pilihan kasar (Dekat/Sedang/Jauh), ratio = selera
+    halus yang diukur dari kerja tangan pengguna. Pasangan LURUS tetap 0 berapa pun keduanya."""
+    return MODES[resolve_mode(mode)] * resolve_ratio(ratio)
+
+
+def _relax_for(strength, clamp_frac, pinch_frac):
+    """Batas yang ikut mengalah saat pengguna MEMINTA lebih rapat (strength > 1).
+
+    Tanpa ini LANTAI anti-tabrakan mengikat hampir semua pasangan (terukur 85% pada font berspasi
+    rapat), sehingga menaikkan kekuatan tak menggerakkan apa pun. Dasarnya tetap MUTLAK
+    (pinch_frac ≥ 0,15) supaya glyph tak pernah benar-benar bertabrakan.
+
+    Dipakai BERSAMA oleh smart_pair, auto_kern_pairs, dan build_kerning. Dulu hanya auto_kern_pairs
+    yang melakukannya → saran di editor bisa beda dari yang ditulis auto-kern & dari seed Re-seed
+    pada kekuatan >1; itu terbaca sbg "hasilnya tidak konsisten".
+    """
+    if strength > 1.0:
+        return clamp_frac * strength, max(0.15, pinch_frac / strength)
+    return clamp_frac, pinch_frac
 
 
 def _side_signature(contours, b, side, samples, upm):
@@ -352,9 +389,10 @@ def _side_signature(contours, b, side, samples, upm):
 
 
 def smart_pair(font, left, right, *, upm, step=10, slope=1.0, deadband=None,
-               clamp_frac=0.22, pinch_frac=0.35, target=None, pinch=None, mode=None):
+               clamp_frac=0.22, pinch_frac=0.35, target=None, pinch=None, mode=None, ratio=None):
     """Kern optikal SADAR-BENTUK untuk SATU pasangan (model v3: cone-fill + openness soft-min).
     mode = "tight"/"medium"/"loose" (lihat MODES); None = sedang.
+    ratio = kerapatan pribadi (None/1,0 = netral) — berlapis di atas mode.
     TIDAK menulis apa pun — hanya menghitung. Return int (0 bila tak ada data / dalam deadband)."""
     if left not in font or right not in font:
         return 0
@@ -371,8 +409,9 @@ def smart_pair(font, left, right, *, upm, step=10, slope=1.0, deadband=None,
     Ltab, Lb = _glyph_margins(Lp[0], Lp[1], step, slope)
     Rtab, Rb = _glyph_margins(Rp[0], Rp[1], step, slope)
     pr = _pair_gaps(Ltab, Lb, font[left].width, Rtab, Rb, step)
-    return _kern_from_profile(pr, target, upm, deadband, clamp_frac, pinch_frac * pinch,
-                              strength_of(mode))
+    strength = strength_of(mode, ratio)
+    clamp_frac, pinch_frac = _relax_for(strength, clamp_frac, pinch_frac)
+    return _kern_from_profile(pr, target, upm, deadband, clamp_frac, pinch_frac * pinch, strength)
 
 
 def flat_target(font, upm, step=10, slope=1.0):
@@ -382,7 +421,8 @@ def flat_target(font, upm, step=10, slope=1.0):
 
 
 def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
-                    clamp_frac=0.22, pinch_frac=0.35, target=None, pinch=None, mode=None):
+                    clamp_frac=0.22, pinch_frac=0.35, target=None, pinch=None, mode=None,
+                    ratio=None):
     """Kern optikal SADAR-BENTUK (model v3) untuk SEMUA pasangan berurutan dari `names`. Return
     {(L,R): int} hanya utk |v|>=deadband. TIDAK menulis. Tabel margin per glyph (mentah + cone-fill
     45°) DIPRAKOMPUTASI SEKALI di grid-y bersama → tiap pasangan tinggal lookup+bobot, bukan scan
@@ -402,16 +442,11 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
         target = _flat_target(font, upm, step, slope)
     if pinch is None:
         pinch = _flat_pinch(font, upm, step, slope)
-    # Kerapatan pilihan pengguna = SATU-SATUNYA pengatur seberapa rapat hasilnya (dulu ada dua:
-    # mode + "belajar selera" tersembunyi — membingungkan & hasilnya sulit ditebak).
-    strength = strength_of(mode)
-    # "Dekat" harus benar-benar terasa: tanpa ini LANTAI anti-tabrakan mengikat hampir semua
-    # pasangan (terukur 85% pada font berspasi rapat) sehingga menaikkan kekuatan tak menggerakkan
-    # apa pun. Saat pengguna MEMINTA lebih rapat, batasnya ikut mengalah — dgn dasar MUTLAK
-    # 0,08×target (≈1,2% em) supaya glyph tak pernah benar-benar bertabrakan.
-    if strength > 1.0:
-        clamp_frac = clamp_frac * strength
-        pinch_frac = max(0.15, pinch_frac / strength)
+    # Kerapatan hasil = mode (Dekat/Sedang/Jauh) × kerapatan pribadi (diukur dari pasangan yang
+    # disetel pengguna). Keduanya knop yang sama & terlihat di UI — bukan "belajar selera"
+    # tersembunyi seperti mekanisme lama yang hasilnya sulit ditebak.
+    strength = strength_of(mode, ratio)
+    clamp_frac, pinch_frac = _relax_for(strength, clamp_frac, pinch_frac)
     floor_gap = pinch_frac * pinch
     out = {}
     for L in ns:
@@ -426,9 +461,44 @@ def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
     return out
 
 
+def baseline_pairs(font, pairs, *, upm, step=10, slope=1.0, deadband=None,
+                   clamp_frac=0.22, pinch_frac=0.35, target=None, pinch=None, mode=None):
+    """Saran DASAR (ratio = 1,0) utk daftar pasangan tertentu — bahan ukur kerapatan pribadi.
+
+    Kalibrasi font (_flat_target/_flat_pinch) & tabel margin tiap glyph dihitung SEKALI di sini;
+    memanggil smart_pair per pasangan akan mengulang keduanya tiap kali (pada font berkontur rumit
+    itu hitungan berdetik-detik, dikali jumlah pasangan kustom). Return {(L,R): int}."""
+    if deadband is None:
+        deadband = _deadband(upm)
+    if target is None:
+        target = _flat_target(font, upm, step, slope)
+    if pinch is None:
+        pinch = _flat_pinch(font, upm, step, slope)
+    strength = strength_of(mode)          # ratio SENGAJA tak ikut: ini titik nol pengukuran
+    clamp_frac, pinch_frac = _relax_for(strength, clamp_frac, pinch_frac)
+    floor_gap = pinch_frac * pinch
+    tables = {}
+    for n in {g for pair in pairs for g in pair}:
+        if n in font:
+            p = _profiles(font[n])
+            if p:
+                tab, b = _glyph_margins(p[0], p[1], step, slope)
+                if tab:
+                    tables[n] = (tab, b)
+    out = {}
+    for L, R in pairs:
+        if L not in tables or R not in tables:
+            continue
+        Ltab, Lb = tables[L]
+        Rtab, Rb = tables[R]
+        pr = _pair_gaps(Ltab, Lb, font[L].width, Rtab, Rb, step)
+        out[(L, R)] = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap, strength)
+    return out
+
+
 def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
                   deadband=None, step=10, samples=10, slope=1.0,
-                  clamp_frac=0.22, pinch_frac=0.35, pinch=None, mode=None):
+                  clamp_frac=0.22, pinch_frac=0.35, pinch=None, mode=None, ratio=None):
     """Hitung & tulis SEED kerning class-level ke `font` (dipakai saat impor). Grouping per bentuk
     sisi; nilai per pasangan-kelas memakai model optik v3 yang SAMA dgn Smart Kerning → seed sudah
     seimbang & konsisten dgn hasil tombol Smart. Return dict laporan."""
@@ -467,6 +537,10 @@ def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
     # --- lantai jepit = pecahan irama font itu sendiri (bukan konstanta) ---
     if pinch is None:
         pinch = _flat_pinch(font, upm, step, slope)
+    # Seed HARUS memakai kekuatan & pelonggaran batas yang sama dgn auto-kern/Smart, kalau tidak
+    # setiap Re-seed diam-diam mengembalikan kerapatan ke netral & selera pengguna hilang.
+    strength = strength_of(mode, ratio)
+    clamp_frac, pinch_frac = _relax_for(strength, clamp_frac, pinch_frac)
     floor_gap = pinch_frac * pinch
 
     # --- kern per pasangan kelas ---
@@ -509,8 +583,7 @@ def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
                                        Rt2[0], Rt2[1], step)
                     if worst is not None and worst[2] < pr[2]:
                         pr = (pr[0], pr[1], worst[2])   # pakai jepit anggota terburuk
-            k = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap,
-                                   strength_of(mode))
+            k = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap, strength)
             if k:
                 pairs[(g1name, g2name)] = k
 

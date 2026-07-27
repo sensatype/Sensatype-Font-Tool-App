@@ -495,6 +495,7 @@ class AutoKern(BaseModel):
     onlyEmpty: bool = True   # True = hanya isi pasangan yang belum ada kerning (tak menimpa)
     recompile: bool = False
     mode: str | None = None  # tight|medium|loose (kerapatan); None → sedang
+    ratio: float | None = None  # kerapatan pribadi; None → pakai yang tersimpan di project
 
 
 @app.post("/api/kerning/auto")
@@ -502,9 +503,33 @@ def kern_auto(body: AutoKern):
     """Auto-kern optikal seluruh pasangan huruf & angka (sadar-bentuk). Aman: onlyEmpty=True."""
     try:
         return project.auto_kern_all(only_empty=body.onlyEmpty, recompile=body.recompile,
-                                     mode=body.mode)
+                                     mode=body.mode, ratio=body.ratio)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"Auto-kern gagal: {e}")
+
+
+@app.get("/api/kerning/taste")
+def kern_taste(mode: str | None = None):
+    """Ukur kerapatan pribadi dari pasangan yang ditetapkan pengguna — read-only, tak menulis.
+    Dipakai UI utk MENAMPILKAN angkanya sebelum diterapkan (bukan kotak hitam)."""
+    try:
+        return project.kern_taste(mode=mode)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Ukur kerapatan gagal: {e}")
+
+
+class KernRatio(BaseModel):
+    value: float
+    mode: str | None = None
+
+
+@app.put("/api/kerning/ratio")
+def kern_ratio(body: KernRatio):
+    """Simpan kerapatan pribadi (pengali kekuatan koreksi optik). Dijepit ke [0,2 … 3,0]."""
+    try:
+        return project.set_kern_ratio(body.value, mode=body.mode)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Simpan kerapatan gagal: {e}")
 
 
 @app.post("/api/preview/recompile")

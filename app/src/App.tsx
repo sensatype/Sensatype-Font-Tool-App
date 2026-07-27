@@ -218,6 +218,7 @@ export function App() {
             charToName={charToName}
             fontV={editV}
             tracking={project.tracking ?? 0}
+            kernRatio={project.kernRatio ?? 1}
             onTracking={onTracking}
             onKern={bumpKern}
             onChanged={(g) => {
