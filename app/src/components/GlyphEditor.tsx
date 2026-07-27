@@ -7,7 +7,7 @@ import { ArrowsOutCardinal, BezierCurve, Square, Circle, Trash, MagnifyingGlassP
 import { api } from "../api";
 import { commandFor, comboFromEvent, type CmdContext } from "../keymap";
 import { contoursToPath, addNode, removeNode, segClosest, analyzeOutline, insertMarks } from "../outline";
-import type { Anchor, ContourPoint, Glyph, GlyphComponent, GlyphDetail, GlyphRender, KernInfo, KernMode, KernTaste } from "../types";
+import type { Anchor, ContourPoint, Glyph, GlyphComponent, GlyphDetail, GlyphRender, KernInfo, KernMemory, KernMode, KernTaste } from "../types";
 import { KERN_MODES } from "../types";
 
 const ANCHOR_COLOR = "#e8a13a"; // warna penanda anchor (amber)
@@ -162,6 +162,8 @@ export function GlyphEditor({
   const [taste, setTaste] = useState<KernTaste | null>(null); // panel terbuka bila ≠ null
   const [tastePct, setTastePct] = useState(100);              // persen yang sedang disunting
   const [tasteBusy, setTasteBusy] = useState(false);
+  // MEMORI lintas-project (per pengguna, lokal). Dibaca bersama panel kerapatan.
+  const [kmem, setKmem] = useState<KernMemory | null>(null);
   const [fitBusy, setFitBusy] = useState(false); // sedang merapatkan SEMUA glyph ke ink
   // mode Rapikan (bersihkan node/handle berlebih tanpa merusak bentuk)
   const [cleanBusy, setCleanBusy] = useState(false);
@@ -466,8 +468,10 @@ export function GlyphEditor({
     setAutoMenu(false);
     setTasteBusy(true);
     try {
+      // kernTaste MEMANEN bukti ke memori, jadi memori dibaca SESUDAHNYA agar sudah termutakhir.
       const t = await api.kernTaste(kernMode);
       setTaste(t);
+      api.kernMemory().then(setKmem).catch(() => setKmem(null));
       // fit "delta" → rasio yang terukur sedang mencocokkan derau (pd Yoruna: 196%, sisa galat
       // 41 vs 18 utk model selisih). Jangan disodorkan sbg angka siap-pakai; tetap di nilai
       // tersimpan supaya menekan Terapkan tak diam-diam memasang angka yang salah.
@@ -2165,6 +2169,53 @@ export function GlyphEditor({
                       berapa pun angkanya; lantai anti-tabrakan tetap berlaku. Tersimpan di project → ikut
                       dipakai saat Re-seed.
                     </div>
+                    {/* MEMORI lintas-project — isinya ditampilkan apa adanya; tak ada yang
+                        dipelajari diam-diam. Bukti dari project ini sudah ikut terhitung. */}
+                    {kmem && kmem.samples > 0 && (
+                      <div className="text-[11px] leading-relaxed px-2 py-1.5 rounded-lg flex flex-col gap-1"
+                           style={{ background: "var(--bg-2)", color: "var(--muted)" }}>
+                        <div>
+                          <b>Memori Anda</b> · {kmem.samples} pasangan dari {kmem.projects} project
+                          {!kmem.enough && " — belum cukup untuk menyimpulkan apa pun (perlu ≥3)"}
+                        </div>
+                        {kmem.enough && kmem.fit === "ratio" && kmem.ratio != null && (
+                          <div>
+                            Kecenderungan Anda: <b style={{ color: "var(--accent)" }}>{Math.round(kmem.ratio * 100)}%</b>{" "}
+                            dari koreksi optik. Project baru akan berangkat dari angka ini.
+                          </div>
+                        )}
+                        {kmem.enough && kmem.fit === "delta" && (
+                          <div>
+                            Kecenderungan Anda bukan kerapatan melainkan <b>spasi</b>
+                            {kmem.suggestTracking != null
+                              ? <> — setara <b style={{ color: "#e8a13a" }}>{kmem.suggestTracking}</b> unit di font ini
+                                  {kmem.rhythm ? ` (irama ${kmem.rhythm})` : ""}.</>
+                              : "."}{" "}
+                            Karena itu project baru TIDAK dipasangi rasio: angkanya akan menyesatkan.
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          {kmem.enough && kmem.fit === "delta" && kmem.suggestTracking != null && onTracking && (
+                            <button className="btn !py-1 !text-[11px]"
+                              onClick={() => { onTracking(kmem.suggestTracking!); setTaste(null); }}
+                              title="Pasang sebagai Spasi global project ini. Non-destruktif — tersimpan di project, bukan di UFO.">
+                              Terapkan {kmem.suggestTracking} sbg Spasi global
+                            </button>
+                          )}
+                          <button className="btn !py-1 !text-[11px] !px-2"
+                            onClick={async () => {
+                              if (!confirm(`Lupakan ${kmem.samples} bukti selera dari ${kmem.projects} project?\n\n`
+                                + "Kerning yang sudah tersimpan di font TIDAK terpengaruh — yang dihapus hanya "
+                                + "catatan kebiasaan yang dipakai untuk menebak selera Anda di project berikutnya.")) return;
+                              try { await api.forgetKernMemory(); setKmem(await api.kernMemory()); }
+                              catch (e) { alert("Gagal melupakan: " + ((e as Error).message || e)); }
+                            }}
+                            title="Hapus seluruh bukti selera milik akun Anda di perangkat ini">
+                            Lupakan
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="flex items-center gap-1.5 pt-0.5">
                       <button className="btn btn-accent !py-1.5 !text-xs" onClick={() => applyTaste(true)}>
                         <Check className="size-3.5" />Simpan & timpa semua

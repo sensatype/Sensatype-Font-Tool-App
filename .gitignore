@@ -37,3 +37,6 @@ auth-token.json
 
 # knowledge graph graphify (artefak lokal, di-regenerasi oleh hook tiap commit)
 graphify-out/
+
+# memori kerapatan pengguna (lokal; berisi nilai kern dari font = IP)
+kern-memory.json

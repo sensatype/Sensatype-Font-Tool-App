@@ -1,4 +1,4 @@
-import type { ContourPoint, GlyphDetail, GlyphRender, KernInfo, KernListEntry, KernMode, KernPair, KernTaste, ProjectState, StagingState } from "./types";
+import type { ContourPoint, GlyphDetail, GlyphRender, KernInfo, KernListEntry, KernMode, KernMemory, KernPair, KernTaste, ProjectState, StagingState } from "./types";
 
 const BASE = "/api";
 
@@ -183,6 +183,13 @@ export const api = {
   // Dipakai UI utk menampilkan angkanya SEBELUM diterapkan.
   kernTaste: (mode: KernMode = "medium") =>
     fetch(`${BASE}/kerning/taste?mode=${mode}`).then(j<KernTaste>),
+
+  // MEMORI lintas-project (per pengguna, lokal di perangkat) — read-only.
+  kernMemory: () => fetch(`${BASE}/kerning/memory`).then(j<KernMemory>),
+
+  // Lupakan seluruh bukti selera milik pengguna ini.
+  forgetKernMemory: () => fetch(`${BASE}/kerning/memory`, { method: "DELETE" })
+    .then(j<{ forgotten: number }>),
 
   // Simpan kerapatan pribadi (dipakai Smart, auto-kern, & seed Re-seed). Dijepit ke [0,2 … 3,0].
   setKernRatio: (value: number, mode: KernMode = "medium") =>

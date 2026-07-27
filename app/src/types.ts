@@ -61,6 +61,26 @@ export interface KernTaste {
   current: number;        // kerapatan yang sedang tersimpan
 }
 
+// MEMORI KERAPATAN lintas-project, per pengguna. Menyimpan BUKTI mentah (tiap pasangan yang
+// Anda setel + saran sistem + irama font saat itu); kesimpulannya dihitung ulang tiap dibaca.
+// Kecenderungan spasi disimpan sbg pecahan irama font agar sahih dibawa ke desain lain;
+// `suggestTracking` = terjemahannya ke unit font yang sedang dibuka.
+export interface KernMemory {
+  samples: number;
+  projects: number;
+  enough: boolean;               // < 3 sampel → sistem tak mengaku tahu apa-apa
+  usedForRatio?: number;
+  ratio: number | null;
+  deltaFrac: number | null;
+  fit: "ratio" | "delta" | null;
+  residualRatio?: number | null;
+  residualDelta?: number | null;
+  suggestTracking?: number;      // deltaFrac × irama font ini (unit em)
+  rhythm?: number;
+  current: number;               // kerapatan yang sedang tersimpan di project ini
+  updatedAt?: number | null;
+}
+
 // kerning ter-resolusi (level kelas/grup, §9.6)
 export interface KernInfo {
   left: string;

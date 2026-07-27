@@ -18,6 +18,10 @@ cp -R engine "$OUT/engine"
 cp -R app/dist "$OUT/dist"
 # PENTING: server/ berisi DATA FONT ASLI (projects/workspace/log) + token login — JANGAN dibundel/publik.
 rm -rf "$OUT/server/projects" "$OUT/server/workspace"
+# kern-memory.json = memori kerapatan pengguna (nama pasangan + nilai kern dari fontnya = IP font).
+# Di aplikasi terpasang ia ada di userData, tapi backend yang dijalankan DARI SUMBER menaruhnya di
+# server/ — tanpa baris ini ia ikut terbundel lalu terbit publik.
+find "$OUT" -name 'kern-memory.json' -delete 2>/dev/null || true
 find "$OUT" -name 'auth-token.json' -delete 2>/dev/null || true
 find "$OUT" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "$OUT" \( -name '*.pyc' -o -name '*.log' \) -delete 2>/dev/null || true

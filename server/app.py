@@ -176,10 +176,15 @@ async def projects_open(pid: str):
     return project.state()
 
 
+def _uid(request: Request):
+    """userId sesi (diisi middleware). None saat auth dimatikan → memori jatuh ke laci "lokal"."""
+    return getattr(request.state, "userId", None)
+
+
 @app.delete("/api/projects/{pid}")
-async def projects_delete(pid: str, _: dict = Depends(auth.require_access)):
+async def projects_delete(pid: str, request: Request, _: dict = Depends(auth.require_access)):
     try:
-        return {"projects": await run_in_threadpool(library.delete, pid), "active": library._active}
+        return {"projects": await run_in_threadpool(library.delete, pid, _uid(request)), "active": library._active}
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -250,7 +255,7 @@ async def import_glyphs(
 ):
     payload = [(f.filename, await f.read()) for f in files]
     try:
-        return project.import_glyphs(payload, family=family, style=style, preset=preset)
+        return project.import_glyphs(payload, family=family, style=style, preset=preset, user_id=_uid(request))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"Import gagal: {e}")
 
@@ -317,9 +322,9 @@ class Commit(BaseModel):
 
 
 @app.post("/api/import/commit")
-def import_commit(body: Commit):
+def import_commit(body: Commit, request: Request):
     try:
-        return project.commit_import(body.tokens, family=body.family, style=body.style, preset=body.preset)
+        return project.commit_import(body.tokens, family=body.family, style=body.style, preset=body.preset, user_id=_uid(request))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"Commit gagal: {e}")
 
@@ -461,9 +466,10 @@ def kern_smart(left: str, right: str, mode: str | None = None):
 
 
 @app.put("/api/kerning")
-def kern(body: Kern):
+def kern(body: Kern, request: Request):
     try:
-        return project.set_kerning(body.left, body.right, body.value, scope=body.scope, recompile=body.recompile)
+        return project.set_kerning(body.left, body.right, body.value, scope=body.scope,
+                                   recompile=body.recompile, user_id=_uid(request))
     except (ValueError, KeyError) as e:
         raise HTTPException(400, f"Kerning gagal: {e}")
 
@@ -509,13 +515,25 @@ def kern_auto(body: AutoKern):
 
 
 @app.get("/api/kerning/taste")
-def kern_taste(mode: str | None = None):
+def kern_taste(request: Request, mode: str | None = None):
     """Ukur kerapatan pribadi dari pasangan yang ditetapkan pengguna — read-only, tak menulis.
     Dipakai UI utk MENAMPILKAN angkanya sebelum diterapkan (bukan kotak hitam)."""
     try:
-        return project.kern_taste(mode=mode)
+        return project.kern_taste(mode=mode, user_id=_uid(request))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"Ukur kerapatan gagal: {e}")
+
+
+@app.get("/api/kerning/memory")
+def kern_memory(request: Request):
+    """Memori kerapatan LINTAS-PROJECT milik pengguna ini — read-only. Lokal di perangkat."""
+    return project.kern_memory(_uid(request))
+
+
+@app.delete("/api/kerning/memory")
+def kern_memory_forget(request: Request):
+    """Lupakan seluruh bukti selera milik pengguna ini."""
+    return project.forget_kern_memory(_uid(request))
 
 
 class KernRatio(BaseModel):

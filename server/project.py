@@ -34,6 +34,7 @@ import presets as presets_mod  # noqa: E402
 import specimen_split  # noqa: E402
 import features as features_mod  # noqa: E402
 import simplify as simplify_mod  # noqa: E402
+import kernmem  # noqa: E402  (memori kerapatan lintas-project, per pengguna)
 
 # WORKSPACE = project "lama" (satu-project). Kini jadi CADANGAN + sumber migrasi ke pustaka.
 # PROJECTS_ROOT = pustaka multi-project (model device-per-user). Keduanya bisa di-override env
@@ -258,7 +259,7 @@ class Project:
         return self.state()
 
     @_locked
-    def import_glyphs(self, files, *, family="Untitled", style="Regular", preset="display-serif"):
+    def import_glyphs(self, files, *, family="Untitled", style="Regular", preset="display-serif", user_id=None):
         """files = list of (filename, bytes). Tiap file = 1 glyph (nama file -> unicode)."""
         # validasi nama DULU (sebelum menulis apa pun): basename .svg saja → cegah path traversal
         for name, _ in files:
@@ -278,6 +279,7 @@ class Project:
             meta = {"family": fam, "style": sty, "upm": 1000, "preset": pre, "layout": None,
                     "rows": "upper,lower",
                     "masters": [{"value": None, "ufo": "project.ufo", "name": sty}], "axis": None}
+            self._seed_from_memory(meta, user_id)   # berangkat dari kebiasaan pengguna
             (tmp / "project.json").write_text(json.dumps(meta, indent=2))
             self._swap_root(tmp)
             self.compile_preview()
@@ -495,7 +497,7 @@ class Project:
         return self.staging_state()
 
     @_locked
-    def commit_import(self, tokens, *, family, style, preset):
+    def commit_import(self, tokens, *, family, style, preset, user_id=None):
         try:
             return self._commit_import(tokens, family=family, style=style, preset=preset)
         except Exception as e:
@@ -564,6 +566,7 @@ class Project:
         self._swap_root(tmp)  # sukses → ganti workspace lama (staging lama ikut terhapus)
         meta = {"family": family, "style": style, "upm": 1000, "preset": preset, "layout": None,
                 "rows": None, "masters": [{"value": None, "ufo": "project.ufo", "name": style}], "axis": None}
+        self._seed_from_memory(meta, user_id)       # berangkat dari kebiasaan pengguna
         self._save_meta(meta)
         self._set_progress(82, "Mengompilasi pratinjau…")
         self.compile_preview()
@@ -987,7 +990,80 @@ class Project:
         m = meta if meta is not None else self._meta()
         return kerning_mod.resolve_mode(m.get("kernMode"))
 
-    def kern_taste(self, mode=None):
+    def _record_kern_evidence(self, font, user_id, pairs):
+        """Catat bukti selera ke memori lintas-project (per pengguna).
+
+        Gagal di sini TIDAK boleh menggagalkan penyuntingan — kerning-nya sendiri sudah tersimpan;
+        memori cuma kenyamanan. Karena itu seluruh badan dibungkus try.
+
+        Font berspasi ~0 (kondisi tepat sesudah impor) DILEWATI: iramanya tak bermakna, sehingga
+        "selisih ÷ irama" jadi angka raksasa yang akan meracuni memori saat dipakai di font lain.
+        """
+        try:
+            if not pairs:
+                return 0
+            upm = font.info.unitsPerEm or 1000
+            rhythm = kerning_mod.flat_target(font, upm)
+            if rhythm < 0.08 * upm:            # ambang sama dgn "spacingFlat" di tempat lain
+                return 0
+            base = kerning_mod.baseline_pairs(font, pairs, upm=upm, mode=self._kern_mode())
+            g1, g2 = self._kern_groups(font)
+            rows = [{"left": L, "right": R, "base": base[(L, R)], "rhythm": rhythm,
+                     "value": self._resolve_kern(font, g1, g2, L, R)}
+                    for (L, R) in pairs if (L, R) in base]
+            return kernmem.record(PROJECTS_ROOT, user_id, self.root.name, rows)
+        except Exception:                      # noqa: BLE001
+            return 0
+
+    def _seed_from_memory(self, meta, user_id):
+        """Project BARU berangkat dari kebiasaan pengguna, bukan dari netral.
+
+        HANYA kerapatan (rasio) yang dipasang otomatis: ia pengali koreksi optik yang sudah
+        ternormalisasi thd font (target & lantai diturunkan dari font itu sendiri), jadi sahih
+        dibawa antar-desain, terbatas [0,2…3,0], dan pasangan lurus tetap 0.
+
+        Kecenderungan SPASI sengaja TIDAK dipasang diam-diam meski ikut diingat: spasi menentukan
+        rupa font secara langsung dan sangat bergantung desain. Ia disajikan sbg saran berangka di
+        panel memori, biar pengguna yang memutuskan.
+
+        Dipasang hanya bila memori berkesimpulan "ratio". Kalau selera pengguna ternyata bertipe
+        selisih, rasionya sedang mencocokkan derau — memasangnya justru menyesatkan.
+        """
+        try:
+            m = kernmem.summary(PROJECTS_ROOT, user_id)
+            if m.get("enough") and m.get("fit") == "ratio" and m.get("ratio"):
+                meta["kernRatio"] = round(kerning_mod.resolve_ratio(m["ratio"]), 3)
+                meta["kernFromMemory"] = True   # UI bisa bilang dari mana angka ini datang
+        except Exception:                       # noqa: BLE001 — memori tak boleh menggagalkan impor
+            pass
+        return meta
+
+    def kern_memory(self, user_id=None):
+        """Kesimpulan memori lintas-project milik pengguna ini — read-only.
+
+        Kecenderungan spasi disimpan sbg PECAHAN irama; di sini diterjemahkan ke unit font yang
+        SEDANG dibuka supaya bisa langsung dipakai. Terjemahan itu memang tugas project, bukan
+        memori — memorinya sendiri harus tetap netral-font agar sahih dibawa ke desain lain.
+        """
+        m = kernmem.summary(PROJECTS_ROOT, user_id)
+        m["current"] = self._kern_ratio()
+        if m.get("enough") and m.get("deltaFrac") is not None and self.exists:
+            try:
+                font = self._font()
+                upm = font.info.unitsPerEm or 1000
+                rhythm = kerning_mod.flat_target(font, upm)
+                if rhythm >= 0.08 * upm:
+                    m["suggestTracking"] = round(m["deltaFrac"] * rhythm)
+                    m["rhythm"] = round(rhythm)
+            except Exception:  # noqa: BLE001
+                pass
+        return m
+
+    def forget_kern_memory(self, user_id=None):
+        """Hapus SELURUH bukti milik pengguna ini."""
+        return {"forgotten": kernmem.forget(PROJECTS_ROOT, user_id)}
+
+    def kern_taste(self, mode=None, user_id=None):
         """Ukur KERAPATAN PRIBADI dari pasangan yang Anda setel sendiri. Read-only.
 
         Untuk tiap pasangan kustom: rasio = nilai Anda ÷ saran DASAR sistem (kekuatan mode, tanpa
@@ -1039,6 +1115,9 @@ class Project:
             rows.append({"left": L, "right": R, "value": v, "base": b, "ratio": round(r, 3)})
         if not evid:
             return out
+        # Panen bukti ke memori lintas-project: baseline-nya sudah terhitung di sini, jadi ini
+        # gratis — sekaligus menangkap pasangan yang disetel SEBELUM memori ini ada.
+        out["remembered"] = self._record_kern_evidence(font, user_id, pairs)
         med_d = statistics.median([v - b for b, v in evid])
         if not rows:
             # Tak satu pun pasangan bisa memberi rasio (semua saran 0 / berlawanan arah) — itu
@@ -1302,7 +1381,7 @@ class Project:
         return {"merged": merged, "variants": len(repl), "groups": len(groups), "kerning": len(nk)}
 
     @_locked
-    def set_kerning(self, left, right, value, scope="class", recompile=True):
+    def set_kerning(self, left, right, value, scope="class", recompile=True, user_id=None):
         """scope='class' → tulis di level GRUP (semua glyph se-kelas ikut, §9.6); 'pair' → kecuali (exception).
         recompile=False → HANYA tulis nilai (cepat, tanpa compile webfont). Dipakai saat menyetel live;
         preview canvas/panel baca dari path+nilai (tak butuh webfont). Recompile webfont dijadwalkan terpisah."""
@@ -1346,6 +1425,11 @@ class Project:
         keys.discard(pk) if v == 0 else keys.add(pk)
         font.lib[self.KERN_CUSTOM_LIB] = sorted(keys)
         font.save(self.ufo_path, overwrite=True)
+        # Bukti untuk memori lintas-project. HANYA pasangan ini (≈30 ms), bukan panen penuh —
+        # set_kerning dipanggil tiap kali pengguna menetapkan nilai. Nilai 0 = pembatalan, jadi
+        # tak dicatat sbg selera.
+        if v != 0:
+            self._record_kern_evidence(font, user_id, [(left, right)])
         if recompile:
             self.compile_static()
         return self.get_kern(left, right)
@@ -1778,11 +1862,17 @@ class ProjectLibrary:
             os.replace(tmp, mp)
             return self.list()
 
-    def delete(self, pid):
+    def delete(self, pid, user_id=None):
         with self._op_lock:
             d = self._safe(pid)
             if d.exists():
                 shutil.rmtree(d)
+            # Bukti selera dari project ini ikut dibuang: memori harus selalu bisa ditelusuri
+            # kembali ke asalnya, dan bukti dari project yang sudah hilang tak bisa lagi diperiksa.
+            try:
+                kernmem.drop_project(PROJECTS_ROOT, user_id, pid)
+            except Exception:  # noqa: BLE001
+                pass
             if self._active == pid:
                 self._active = None
                 dirs = self._dirs()
