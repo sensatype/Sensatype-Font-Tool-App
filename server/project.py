@@ -1014,27 +1014,43 @@ class Project:
         if not pairs:
             return out
         base = kerning_mod.baseline_pairs(font, pairs, upm=upm, mode=mode)
-        rows = []
+        # DUA himpunan, dan bedanya menentukan diagnosis:
+        #   evid = SEMUA pasangan terukur → BUKTI, dipakai menilai kedua model.
+        #   rows = yang saran-nya ≠ 0 & searah → hanya dari sini rasio bisa dihitung (bagi nol).
+        # Dulu kedua model dinilai pada `rows` saja. Itu keliru dan berat sebelah: pasangan
+        # bersaran NOL yang pengguna setel bukan-nol adalah bukti TERKUAT bahwa seleranya bukan
+        # perkalian (0 × apa pun tetap 0) — membuangnya justru menghapus data yang membedakan
+        # kedua model. Terukur pd Yoruna: dgn `rows` saja sisa galat 25 vs 19 → salah lapor
+        # "ratio"; dgn `evid` 45 vs 18 → "delta", dan itulah yang benar.
+        evid, rows = [], []
         for L, R in pairs:
             b = base.get((L, R))
             if b is None:
                 continue                      # glyph tanpa kontur → tak terukur
             v = self._resolve_kern(font, g1, g2, L, R)
+            evid.append((b, v))
             if b == 0:
-                out["zeroBase"] += 1          # saran nol → tak membawa informasi rasio
+                out["zeroBase"] += 1          # tak membawa informasi RASIO (tetap jadi bukti)
                 continue
             r = v / b
             if r <= 0:
-                out["flipped"] += 1           # tanda berlawanan → niat lain, bukan soal kerapatan
+                out["flipped"] += 1           # tanda berlawanan → rasio negatif tak bermakna
                 continue
             rows.append({"left": L, "right": R, "value": v, "base": b, "ratio": round(r, 3)})
+        if not evid:
+            return out
+        med_d = statistics.median([v - b for b, v in evid])
         if not rows:
+            # Tak satu pun pasangan bisa memberi rasio (semua saran 0 / berlawanan arah) — itu
+            # sendiri sudah jawaban: yang dimau jelas bukan kerapatan.
+            out.update({"delta": round(med_d), "fit": "delta",
+                        "residualDelta": round(statistics.median([abs(v - (b + med_d)) for b, v in evid]))})
             return out
         med_r = statistics.median([x["ratio"] for x in rows])
-        med_d = statistics.median([x["value"] - x["base"] for x in rows])
-        # Sisa (median galat mutlak) tiap model → mana yang benar-benar menjelaskan kebiasaan Anda.
-        res_r = statistics.median([abs(x["value"] - x["base"] * med_r) for x in rows])
-        res_d = statistics.median([abs(x["value"] - (x["base"] + med_d)) for x in rows])
+        # Sisa (median galat mutlak) tiap model, dinilai pada BUKTI yang sama. Model rasio
+        # meramalkan 0 di pasangan bersaran 0; meleset sejauh itu memang kesalahannya.
+        res_r = statistics.median([abs(v - b * med_r) for b, v in evid])
+        res_d = statistics.median([abs(v - (b + med_d)) for b, v in evid])
         applied = kerning_mod.resolve_ratio(med_r)
         out.update({
             "used": len(rows),
@@ -1043,8 +1059,11 @@ class Project:
             "clamped": abs(applied - med_r) > 0.005,   # selera di luar [0,2…3,0] → dijepit
             "delta": round(med_d),
             "residualRatio": round(res_r), "residualDelta": round(res_d),
-            # ambang 0,7: model TAMBAH harus jelas lebih baik, bukan sekadar beda derau
-            "fit": "delta" if res_d < res_r * 0.7 else "ratio",
+            # Ambang 0,9 = sedikit berpihak pada RASIO saat keduanya nyaris seri: menerapkan rasio
+            # aman (pasangan lurus tetap 0, lantai tetap menjaga), sedangkan "selisih" sebenarnya
+            # pekerjaan Spasi global. Dulu 0,7 — terlalu ketat: pd data nyata model selisih menang
+            # 45 vs 18 namun tetap dilaporkan "ratio" karena buktinya diseleksi lebih dulu.
+            "fit": "delta" if res_d < res_r * 0.9 else "ratio",
             "pairs": sorted(rows, key=lambda x: -abs(x["ratio"] - 1.0))[:20],
         })
         return out

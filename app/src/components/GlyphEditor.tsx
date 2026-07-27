@@ -468,7 +468,11 @@ export function GlyphEditor({
     try {
       const t = await api.kernTaste(kernMode);
       setTaste(t);
-      setTastePct(Math.round((t.ratio ?? t.current ?? 1) * 100));
+      // fit "delta" → rasio yang terukur sedang mencocokkan derau (pd Yoruna: 196%, sisa galat
+      // 41 vs 18 utk model selisih). Jangan disodorkan sbg angka siap-pakai; tetap di nilai
+      // tersimpan supaya menekan Terapkan tak diam-diam memasang angka yang salah.
+      const pre = t.fit === "delta" ? (t.current ?? 1) : (t.ratio ?? t.current ?? 1);
+      setTastePct(Math.round(pre * 100));
     } catch (e) {
       alert("Gagal mengukur kerapatan: " + ((e as Error).message || e));
     } finally {
@@ -2139,8 +2143,14 @@ export function GlyphEditor({
                       <div className="text-[11px] leading-relaxed px-2 py-1.5 rounded-lg"
                            style={{ background: "color-mix(in srgb, #e8a13a 15%, transparent)", color: "#e8a13a" }}>
                         Edit Anda lebih cocok pola <b>“semua {taste.delta! > 0 ? "+" : "−"}{Math.abs(taste.delta!)} unit”</b>{" "}
-                        daripada persentase. Itu pekerjaan <b>Spasi global</b>, bukan kerning — persentase
-                        mengalikan koreksi, jadi pasangan lurus (H·H, koreksinya nol) tetap tak bergerak.
+                        daripada persentase{taste.residualDelta != null && taste.residualRatio != null
+                          && ` (sisa galat ${taste.residualDelta} vs ${taste.residualRatio})`}. Itu pekerjaan{" "}
+                        <b>Spasi global</b>, bukan kerning — persentase mengalikan koreksi, jadi pasangan
+                        lurus (H·H, koreksinya nol) tetap tak bergerak.
+                        <br />
+                        Coba setel Spasi global ke <b>{taste.delta}</b>. Sesudah itu pasangan yang sudah Anda
+                        setel sendiri jadi terlalu rapat (koreksinya terhitung dua kali) — jalankan
+                        “Hitung ulang” pada pasangan-pasangan itu.
                       </div>
                     )}
                     <label className="flex items-center gap-2 text-xs">
