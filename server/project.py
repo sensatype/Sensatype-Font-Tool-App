@@ -23,6 +23,13 @@ from pathlib import Path
 ENGINE = Path(os.environ.get("SENSATYPE_ENGINE_DIR")
               or (Path(__file__).resolve().parent.parent / "engine"))
 sys.path.insert(0, str(ENGINE))
+# Direktori server/ SENDIRI. Di aplikasi TERPASANG, run_backend._add_content_to_path() hanya
+# memasukkan <content> ke sys.path — `server` terbaca sbg PAKET, tapi modul tetangganya TIDAK bisa
+# diimpor absolut (`import kernmem` → ModuleNotFoundError). Gagalnya terjadi saat IMPOR, jadi
+# backend tak pernah menyala sama sekali dan jendela berhenti di "Memuat…" selamanya — gejala yang
+# sulit dilacak ke sebabnya. Menaruh direktori ini di sys.path membuat impor antar-modul server
+# berperilaku sama di mode terpasang, dev, maupun uji.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ufoLib2  # noqa: E402
 from fontTools.pens.svgPathPen import SVGPathPen  # noqa: E402
