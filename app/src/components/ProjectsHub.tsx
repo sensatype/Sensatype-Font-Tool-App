@@ -14,6 +14,41 @@ function rel(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
+// Kelompokkan project per KURUN PENGERJAAN. Batasnya HARI KALENDER, bukan selisih jam: "kemarin"
+// harus berarti tanggal kemarin. Kalau memakai selisih jam, project yang dikerjakan tadi sore bisa
+// terlempar ke "kemarin" begitu jam melewati tengah malam — padahal bagi yang mengerjakan, itu
+// masih "hari ini".
+const DAY_MS = 86_400_000;
+const startOfDay = (t: number) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+
+function bucketOf(ts: number, today0: number): { key: string; label: string } {
+  // Math.round, bukan floor: pergantian waktu musim panas membuat sebagian hari 23/25 jam, dan
+  // floor pada 23,96 hari akan menggeser seluruh kelompok satu hari.
+  const days = Math.round((today0 - startOfDay(ts)) / DAY_MS);
+  if (days <= 0) return { key: "d0", label: "Hari ini" };       // ≤0 juga menangkap jam yg maju
+  if (days === 1) return { key: "d1", label: "Kemarin" };
+  if (days < 7) return { key: "w", label: "7 hari terakhir" };
+  if (days < 30) return { key: "m", label: "30 hari terakhir" };
+  const d = new Date(ts);
+  return { key: `${d.getFullYear()}-${d.getMonth()}`,
+           label: d.toLocaleDateString("id-ID", { month: "long", year: "numeric" }) };
+}
+
+function groupByDate(items: ProjectSummary[]) {
+  const today0 = startOfDay(Date.now());
+  const out: { key: string; label: string; items: ProjectSummary[] }[] = [];
+  const at = new Map<string, number>();
+  // Diurutkan terbaru-dulu → kelompoknya otomatis muncul berurutan (hari ini → kemarin → …),
+  // tak perlu mengurutkan kelompok secara terpisah.
+  for (const p of [...items].sort((a, b) => b.updatedAt - a.updatedAt)) {
+    const b = bucketOf(p.updatedAt, today0);
+    let i = at.get(b.key);
+    if (i === undefined) { i = out.length; at.set(b.key, i); out.push({ ...b, items: [] }); }
+    out[i].items.push(p);
+  }
+  return out;
+}
+
 // Muat webfont pratinjau SATU project sbg @font-face ber-nama unik → kartunya tampil dalam huruf
 // project itu sendiri (ini alat desain font; kartu generik membuang informasi paling berguna).
 // Project yang belum pernah dikompilasi tak punya preview.woff2 → 404 itu NORMAL, bukan error:
@@ -219,19 +254,33 @@ export function ProjectsHub({ onOpen, onCreate, canDelete }: {
             <span className="btn btn-accent mt-1"><Plus className="size-4" /> Project baru</span>
           </button>
         ) : (
-          <div className="grid gap-5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
-            {items.map((p) => (
-              <ProjectCard
-                key={p.id}
-                p={p}
-                canDelete={canDelete}
-                busy={busyId === p.id}
-                onOpen={() => onOpen(p.id)}
-                onRename={() => setRenaming(p)}
-                onDelete={() => setConfirmDel(p)}
-              />
-            ))}
-          </div>
+          // Dikelompokkan per kurun pengerjaan — yang dikerjakan hari ini tak lagi bercampur
+          // dengan yang bulan lalu. Judul kelompok memakai idiom yang sama dgn daftar glyph
+          // di editor ("UPPERCASE · 26") supaya terbaca sebagai satu aplikasi.
+          groupByDate(items).map((g) => (
+            <section key={g.key} className="mb-8 last:mb-0">
+              <div className="flex items-baseline gap-2 mb-3">
+                <h2 className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted)" }}>
+                  {g.label}
+                </h2>
+                <span className="text-[11px]" style={{ color: "var(--faint)" }}>· {g.items.length}</span>
+                <div className="flex-1 h-px ml-1" style={{ background: "var(--border)" }} />
+              </div>
+              <div className="grid gap-5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+                {g.items.map((p) => (
+                  <ProjectCard
+                    key={p.id}
+                    p={p}
+                    canDelete={canDelete}
+                    busy={busyId === p.id}
+                    onOpen={() => onOpen(p.id)}
+                    onRename={() => setRenaming(p)}
+                    onDelete={() => setConfirmDel(p)}
+                  />
+                ))}
+              </div>
+            </section>
+          ))
         )}
       </div>
 
