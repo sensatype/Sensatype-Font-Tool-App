@@ -2,15 +2,18 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsOutCardinal, BezierCurve, Square, Circle, Trash, MagnifyingGlassPlus, MagnifyingGlassMinus, CornersOut, ArrowUUpLeft, ArrowUUpRight, Magnet,
   Cube, Ruler, ArrowsLeftRight, TextT, Cursor,
   FlipHorizontal, FlipVertical, ArrowCounterClockwise, ArrowClockwise, Anchor as AnchorIcon,
-  Copy, SelectionPlus, SelectionSlash, Unite, CircleNotch, Crosshair, GridNine, Moon, Sun, Check, X, Sparkle, MagicWand } from "@phosphor-icons/react";
+  Copy, SelectionPlus, SelectionSlash, Unite, CircleNotch, Crosshair, GridNine, Moon, Sun, Check, X, Sparkle, MagicWand,
+  Waves } from "@phosphor-icons/react";
 import { api } from "../api";
 import { commandFor, comboFromEvent, type CmdContext } from "../keymap";
-import { contoursToPath, addNode, removeNode, segClosest } from "../outline";
+import { contoursToPath, addNode, removeNode, segClosest, analyzeOutline, insertMarks } from "../outline";
 import type { Anchor, ContourPoint, Glyph, GlyphComponent, GlyphDetail, GlyphRender, KernInfo, KernMode, KernTaste } from "../types";
 import { KERN_MODES } from "../types";
 
 const ANCHOR_COLOR = "#e8a13a"; // warna penanda anchor (amber)
 const COMP_COLOR = "#4aa3df";   // warna komponen (biru)
+const INFLECT_COLOR = "#22c55e"; // titik belok (hijau) — mengikuti konvensi FontLab
+const EXTREME_COLOR = "#e05fc4"; // ekstrem: tangen mendatar/tegak (magenta)
 
 // 6 mode ala FontLab.
 type Mode = "contour" | "element" | "metrics" | "kerning" | "cleanup" | "text";
@@ -111,6 +114,16 @@ export function GlyphEditor({
   const [cSel, setCSel] = useState<number | null>(null); // index komponen terpilih
   const compsRef = useRef(comps); compsRef.current = comps;
   const [addComp, setAddComp] = useState(""); // input nama glyph utk tambah komponen
+  // ANALISIS KONTUR (ala FontLab): tandai titik BELOK & EKSTREM yang BELUM punya node.
+  // Belok = arah lengkung berbalik (kurva S); ekstrem = tangen mendatar/tegak. Keduanya sebaiknya
+  // bernode: segmen ber-S sulit disetel, dan saat interpolasi antar-master posisi beloknya
+  // bergeser sehingga muncul kerutan. Pilihan tampil diingat antar-sesi.
+  const [showMarks, setShowMarks] = useState(() => {
+    try { return localStorage.getItem("ge.showMarks") === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("ge.showMarks", showMarks ? "1" : "0"); } catch { /* storage penuh */ }
+  }, [showMarks]);
   // ELEMENT mode: seleksi elemen utuh (kontur "c{i}" / komponen "m{i}") + grup (sesi-lokal)
   const [eSel, setESel] = useState<Set<string>>(new Set());
   const eSelRef = useRef(eSel); eSelRef.current = eSel;
@@ -795,6 +808,18 @@ export function GlyphEditor({
   function zoomBtn(f: number) { const r = svgRef.current!.getBoundingClientRect(); zoomAtCursor(f, r.left + r.width / 2, r.top + r.height / 2); }
   function resetView() { setView2({ fx: 0.5, fy: 0.5, zoom: 1 }); }
 
+  // ANALISIS KONTUR: titik belok & ekstrem yang belum punya node.
+  // WAJIB di ATAS dua early-return di bawah — hook yang dilewati saat glyph belum termuat
+  // membuat jumlah hook berubah antar-render (React #310, seluruh editor jatuh).
+  // Toleransi diskalakan ke upm project supaya font ber-upm 2048 tak membanjiri kanvas dgn
+  // temuan sepele: flatTol = kurva yang simpangannya di bawah ini dianggap lurus (beloknya
+  // cuma derau), nodeTol = temuan sedekat ini ke node yang ada dianggap sudah bernode.
+  const outlineMarks = useMemo(() => {
+    if (!showMarks || mode !== "contour") return [];
+    const s = (d?.upm || 1000) / 1000;
+    return analyzeOutline(contours, { flatTol: s, nodeTol: 2 * s });
+  }, [showMarks, mode, contours, d?.upm]);
+
   if (!name) return <div className="flex-1 grid place-items-center text-faint">Pilih glyph</div>;
   if (!d) return <div className="flex-1 grid place-items-center text-faint">{loadErr ? "Gagal memuat glyph — cek server lalu pilih ulang." : "Memuat glyph…"}</div>;
 
@@ -907,6 +932,15 @@ export function GlyphEditor({
       pushHist({ contours: next, lsb: res.lsb, rsb: res.rsb, ascender: res.ascender, descender: res.descender, capHeight: res.capHeight, xHeight: res.xHeight });
       syncCacheOutline(name!, next, res.advance); // real-time: mode Text ikut segar
     });
+  }
+  // ---- analisis kontur: pasang node di titik belok & ekstrem ----
+  // (perhitungannya sendiri ada di atas early-return; lihat catatan hook di sana)
+  function applyOutlineMarks() {
+    if (!outlineMarks.length) return;
+    const next = insertMarks(contours, outlineMarks);
+    setSel(new Set());     // index titik bergeser sesudah penyisipan → seleksi lama tak sahih lagi
+    setContours(next);
+    commitOutline(next);
   }
   // ---- metrik vertikal (font-wide) ----
   async function commitMetric(key: "ascender" | "descender" | "capHeight" | "xHeight", v: number) {
@@ -1670,6 +1704,33 @@ export function GlyphEditor({
                 </g>
               ))}
 
+              {/* Penanda BELOK & EKSTREM — murni informasi, tak bisa diklik supaya tak
+                  merebut target dari node di bawahnya. */}
+              {mode === "contour" && outlineMarks.length > 0 && (
+                <g style={{ pointerEvents: "none" }}>
+                  {outlineMarks.map((m, i) => {
+                    const r = nodeR * 1.25;
+                    if (m.kind === "inflection")
+                      return (
+                        <g key={`inf${i}`}>
+                          <line x1={m.x - r} y1={m.y} x2={m.x + r} y2={m.y} stroke={INFLECT_COLOR} strokeWidth={nodeStroke * 1.6} />
+                          <line x1={m.x} y1={m.y - r} x2={m.x} y2={m.y + r} stroke={INFLECT_COLOR} strokeWidth={nodeStroke * 1.6} />
+                        </g>
+                      );
+                    // ekstrem: wajik, dgn sumbu ditandai lewat orientasi garis bantu pendek
+                    return (
+                      <g key={`ext${i}`}>
+                        <path d={`M ${m.x} ${m.y - r} L ${m.x + r} ${m.y} L ${m.x} ${m.y + r} L ${m.x - r} ${m.y} Z`}
+                          fill="none" stroke={EXTREME_COLOR} strokeWidth={nodeStroke * 1.4} />
+                        {m.axis === "x"
+                          ? <line x1={m.x} y1={m.y - r * 1.9} x2={m.x} y2={m.y + r * 1.9} stroke={EXTREME_COLOR} strokeWidth={nodeStroke * 0.8} opacity={0.55} />
+                          : <line x1={m.x - r * 1.9} y1={m.y} x2={m.x + r * 1.9} y2={m.y} stroke={EXTREME_COLOR} strokeWidth={nodeStroke * 0.8} opacity={0.55} />}
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
+
               {/* pratinjau bentuk saat digambar (kotak/elips) */}
               {draft && (() => {
                 const x0 = Math.min(draft.x0, draft.x1), x1 = Math.max(draft.x0, draft.x1);
@@ -1840,7 +1901,26 @@ export function GlyphEditor({
                 <TransformNum label="Skala%" onApply={(v) => scaleSel(v)} placeholder="100" />
               </div>
             )}
-            <button className={`btn ${sel.size > 0 && tool === "select" ? "" : "ml-auto"}`} onClick={toggleSmooth} disabled={!selIsOn}
+            {/* ANALISIS KONTUR — setara "show inflections/extremes" di FontLab */}
+            <div className={`flex items-center gap-1 ${sel.size > 0 && tool === "select" ? "" : "ml-auto"}`}>
+              <button className="btn" onClick={() => setShowMarks((v) => !v)}
+                style={showMarks ? { color: INFLECT_COLOR, borderColor: INFLECT_COLOR } : undefined}
+                title={"Tandai titik BELOK (arah lengkung berbalik — kurva S) & EKSTREM (tangen mendatar/tegak) yang belum punya node.\n"
+                  + "Silang hijau = belok · wajik magenta = ekstrem.\n"
+                  + "Kenapa penting: segmen ber-S sulit disetel, dan saat interpolasi antar-master posisi beloknya bergeser sehingga muncul kerutan."}>
+                <Waves className="size-4" />Belok & ekstrem
+                {showMarks && (
+                  <span className="tabular-nums text-[10px] opacity-75">{outlineMarks.length}</span>
+                )}
+              </button>
+              {showMarks && outlineMarks.length > 0 && (
+                <button className="btn btn-accent" onClick={applyOutlineMarks}
+                  title={`Sisipkan ${outlineMarks.length} node tepat di titik-titik itu. Bentuk kurva TIDAK berubah — segmen hanya dipecah (de Casteljau).`}>
+                  <Sparkle className="size-4" />Pasang node ({outlineMarks.length})
+                </button>
+              )}
+            </div>
+            <button className="btn" onClick={toggleSmooth} disabled={!selIsOn}
               title="Sudut = handle independen (kotak) · Halus = handle terikat collinear (lingkaran)">
               {selSmooth ? <Square className="size-4" /> : <Circle className="size-4" />}
               {selSmooth ? "Jadikan sudut" : "Jadikan halus"}
