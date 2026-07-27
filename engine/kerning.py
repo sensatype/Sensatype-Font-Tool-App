@@ -328,11 +328,25 @@ def resolve_ratio(ratio):
     return max(RATIO_MIN, min(RATIO_MAX, r))
 
 
+def ratio_at(ratio, cat=None):
+    """Kerapatan untuk satu kategori pasangan.
+
+    `ratio` boleh ANGKA (seragam, seperti dulu) atau PETA kategori→angka, mis.
+    {"diagonal×lurus": 1.32, "bulat×bulat": 1.05, "*": 1.15}. Kunci "*" = jatuhan untuk
+    kategori yang tak ada di peta. Bentuk peta dipakai memori lintas-project agar selera yang
+    memang berbeda per bentuk tak dipaksa jadi satu angka; peta yang kategorinya masih tipis
+    sudah ditarik ke angka global di sisi memori, jadi di sini tak perlu tahu apa-apa soal itu.
+    """
+    if isinstance(ratio, dict):
+        return resolve_ratio(ratio.get(cat, ratio.get("*", 1.0)))
+    return resolve_ratio(ratio)
+
+
 def strength_of(mode, ratio=None):
     """Mode + kerapatan pribadi → faktor kekuatan koreksi optik.
     Keduanya mengalikan knop yang SAMA: mode = pilihan kasar (Dekat/Sedang/Jauh), ratio = selera
     halus yang diukur dari kerja tangan pengguna. Pasangan LURUS tetap 0 berapa pun keduanya."""
-    return MODES[resolve_mode(mode)] * resolve_ratio(ratio)
+    return MODES[resolve_mode(mode)] * ratio_at(ratio)
 
 
 def _relax_for(strength, clamp_frac, pinch_frac):
@@ -349,6 +363,73 @@ def _relax_for(strength, clamp_frac, pinch_frac):
     if strength > 1.0:
         return clamp_frac * strength, max(0.15, pinch_frac / strength)
     return clamp_frac, pinch_frac
+
+
+def _side_depth(contours, b, side, samples, upm):
+    """Profil KEDALAMAN ink satu sisi (0 = paling menonjol; makin besar = makin masuk ke dalam),
+    dalam satuan 0,04 em, diambil pada tinggi glyph yang dinormalkan. Inti bersama
+    _side_signature (tanda-tangan kelas) & side_category (kategori belajar)."""
+    minY, maxY = b[1], b[3]
+    if maxY <= minY:
+        return None
+    edges = []
+    for i in range(samples):
+        y = minY + (maxY - minY) * (i + 0.5) / samples
+        edges.append(htls._margins_at(contours, y))
+    if side == "right":
+        vals = [mx for mn, mx in edges if mx is not None]
+        if not vals:
+            return None
+        extreme = max(vals)
+        return [round((extreme - (mx if mx is not None else extreme)) / (upm * 0.04)) for mn, mx in edges]
+    vals = [mn for mn, mx in edges if mn is not None]
+    if not vals:
+        return None
+    extreme = min(vals)
+    return [round(((mn if mn is not None else extreme) - extreme) / (upm * 0.04)) for mn, mx in edges]
+
+
+# Kategori bentuk sisi — KASAR (4 kelompok), sengaja jauh lebih kasar dari kelas kern.
+CATEGORIES = ("lurus", "bulat", "diagonal", "terbuka")
+
+
+def side_category(contours, b, side, samples=10, upm=1000):
+    """Kategori BENTUK kasar satu sisi glyph → "lurus" / "bulat" / "diagonal" / "terbuka".
+
+    Diturunkan dari profil kedalaman yang SAMA dengan tanda-tangan kelas kern, tapi hanya 4
+    kelompok, bukan ratusan. Bedanya disengaja: kelas kern memisahkan bentuk untuk MENYIMPAN
+    nilai (makin halus makin baik), sedangkan kategori ini mengelompokkan bentuk untuk BELAJAR
+    selera — dan belajar butuh kelompok yang cukup besar agar ada sampelnya. Kelas sehalus itu
+    akan memberi n=1 di mana-mana dan tak pernah bisa disimpulkan.
+
+    Aturannya diturunkan dari profil NYATA, bukan dari bayangan bentuknya. Yang membedakan
+    "terbuka" dari "bulat"/"diagonal" ternyata bukan posisi puncak melainkan ada-tidaknya TEBING:
+    palang T & kaki L melompat dari 0 ke kedalaman penuh dalam satu langkah, sedangkan busur O
+    dan diagonal A melandai. Contoh terukur (satuan 0,04 em, index 0 = bawah glyph):
+
+      H kanan  [0,0,0,0,0,0,0,0,0,0]              rentang 0        → lurus
+      O kanan  [5,2,1,0,0,0,0,1,2,5]              langkah 3 / 5    → bulat   (dalam di KEDUA ujung)
+      A kanan  [0,1,2,3,3,4,5,6,7,7]              langkah 1 / 7    → diagonal (melandai)
+      T kanan  [5,5,5,5,5,5,5,5,0,0]              langkah 5 / 5    → terbuka  (tebing)
+      c kanan  [2,1,0,8,8,8,2,1,1,2]              langkah 8 / 8    → terbuka  (mulut)
+    """
+    depth = _side_depth(contours, b, side, samples, upm)
+    if not depth:
+        return "lurus"
+    rng = max(depth) - min(depth)
+    if rng <= 2:                                  # ≤0,08 em → praktis rata (batang, titik)
+        return "lurus"
+    n = len(depth)
+    step = max(abs(depth[i + 1] - depth[i]) for i in range(n - 1))
+    if step >= 0.75 * rng:                        # satu lompatan ≈ seluruh rentang → tebing
+        return "terbuka"
+    lo = min(depth)
+    # dalam di KEDUA ujung & paling menonjol di tengah → busur
+    if min(depth[0], depth[-1]) - lo >= 0.4 * rng:
+        imin = depth.index(lo)
+        if 0.2 < (imin + 0.5) / n < 0.8:
+            return "bulat"
+    return "diagonal"                             # melandai dari satu ujung ke ujung lain
 
 
 def _side_signature(contours, b, side, samples, upm):
@@ -409,7 +490,9 @@ def smart_pair(font, left, right, *, upm, step=10, slope=1.0, deadband=None,
     Ltab, Lb = _glyph_margins(Lp[0], Lp[1], step, slope)
     Rtab, Rb = _glyph_margins(Rp[0], Rp[1], step, slope)
     pr = _pair_gaps(Ltab, Lb, font[left].width, Rtab, Rb, step)
-    strength = strength_of(mode, ratio)
+    # Kategori pasangan → kerapatan yang SAMA dgn yang dipakai auto-kern & seed Re-seed.
+    cat = f"{side_category(Lp[0], Lp[1], 'right', 10, upm)}×{side_category(Rp[0], Rp[1], 'left', 10, upm)}"
+    strength = MODES[resolve_mode(mode)] * ratio_at(ratio, cat)
     clamp_frac, pinch_frac = _relax_for(strength, clamp_frac, pinch_frac)
     return _kern_from_profile(pr, target, upm, deadband, clamp_frac, pinch_frac * pinch, strength)
 
@@ -456,7 +539,7 @@ def baseline_pairs(font, pairs, *, upm, step=10, slope=1.0, deadband=None,
 
 
 def _class_pairs(font, kern1_groups, kern2_groups, margins, *, upm, step, deadband,
-                 target, pinch, clamp_frac, pinch_frac, mode, ratio):
+                 target, pinch, clamp_frac, pinch_frac, mode, ratio, cats1=None, cats2=None):
     """Nilai kern utk SETIAP kombinasi (kelas kiri × kelas kanan). Return {(g1,g2): int} — hanya
     yang |v| ≥ deadband.
 
@@ -478,9 +561,15 @@ def _class_pairs(font, kern1_groups, kern2_groups, margins, *, upm, step, deadba
     Dipakai BERSAMA oleh build_kerning (grup baru dari tanda-tangan bentuk) dan rekern_classes
     (grup yang sudah ada di font) — supaya seed Re-seed & "Timpa semua" tak bisa berbeda hasil.
     """
-    strength = strength_of(mode, ratio)
-    clamp_frac, pinch_frac = _relax_for(strength, clamp_frac, pinch_frac)
-    floor_gap = pinch_frac * pinch
+    # Kerapatan bisa SERAGAM (angka) atau PER KATEGORI BENTUK (peta). Pada bentuk peta, kekuatan
+    # & pelonggaran batas jadi per-pasangan — ongkosnya cuma beberapa operasi aritmetika per
+    # pasangan, sementara jalur seragam tetap menghitungnya sekali di luar loop.
+    per_cat = isinstance(ratio, dict) and cats1 and cats2
+    base_clamp, base_pinch = clamp_frac, pinch_frac
+    if not per_cat:
+        strength = strength_of(mode, ratio)
+        clamp_frac, pinch_frac = _relax_for(strength, clamp_frac, pinch_frac)
+        floor_gap = pinch_frac * pinch
 
     def _envelope(members, side):
         """y → jarak margin TERKECIL lintas anggota kelas (sisi yang berhadapan, ink mentah)."""
@@ -524,7 +613,13 @@ def _class_pairs(font, kern1_groups, kern2_groups, margins, *, upm, step, deadba
                         mn = d + d2
                 if mn is not None and mn < pr[2]:
                     pr = (pr[0], pr[1], mn)
-            k = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap, strength)
+            if per_cat:
+                cat = f"{cats1.get(g1name, 'lurus')}×{cats2.get(g2name, 'lurus')}"
+                strength = MODES[resolve_mode(mode)] * ratio_at(ratio, cat)
+                cf, pf = _relax_for(strength, base_clamp, base_pinch)
+                k = _kern_from_profile(pr, target, upm, deadband, cf, pf * pinch, strength)
+            else:
+                k = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap, strength)
             if k:
                 pairs[(g1name, g2name)] = k
     return pairs
@@ -561,7 +656,7 @@ def rekern_classes(font, *, upm, step=10, slope=1.0, deadband=None,
     k2 = {g: list(m) for g, m in font.groups.items() if g.startswith("public.kern2.")}
     if not k1 or not k2:
         return {}
-    margins = {}
+    margins, prof = {}, {}
     for n in {x for m in list(k1.values()) + list(k2.values()) for x in m}:
         if n in font:
             p = _profiles(font[n])
@@ -569,6 +664,7 @@ def rekern_classes(font, *, upm, step=10, slope=1.0, deadband=None,
                 tab, b = _glyph_margins(p[0], p[1], step, slope)
                 if tab:
                     margins[n] = (tab, b)
+                    prof[n] = p
     # anggota tanpa kontur dibuang; kelas yang jadi kosong ikut gugur (eksemplar tak boleh glyph
     # kosong — openness-nya tak terdefinisi & seluruh kelas akan mendapat 0)
     k1 = {g: v for g, v in ((g, _exemplar_first(g, m, margins)) for g, m in k1.items()) if v}
@@ -579,9 +675,13 @@ def rekern_classes(font, *, upm, step=10, slope=1.0, deadband=None,
         target = _flat_target(font, upm, step, slope)
     if pinch is None:
         pinch = _flat_pinch(font, upm, step, slope)
+    # Kategori bentuk diambil dari EKSEMPLAR tiap kelas (anggota pertama sesudah _exemplar_first),
+    # sama seperti openness — satu kelas satu bentuk acuan.
+    c1 = {g: side_category(*prof[m[0]], "right", 10, upm) for g, m in k1.items() if m[0] in prof}
+    c2 = {g: side_category(*prof[m[0]], "left", 10, upm) for g, m in k2.items() if m[0] in prof}
     return _class_pairs(font, k1, k2, margins, upm=upm, step=step, deadband=deadband,
                         target=target, pinch=pinch, clamp_frac=clamp_frac,
-                        pinch_frac=pinch_frac, mode=mode, ratio=ratio)
+                        pinch_frac=pinch_frac, mode=mode, ratio=ratio, cats1=c1, cats2=c2)
 
 
 def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
@@ -628,9 +728,11 @@ def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
     # --- kern per pasangan kelas (inti yang sama dgn rekern_classes) ---
     # Seed HARUS memakai kekuatan & pelonggaran batas yang sama dgn auto-kern/Smart, kalau tidak
     # setiap Re-seed diam-diam mengembalikan kerapatan ke netral & selera pengguna hilang.
+    c1 = {g: side_category(*data[m[0]], "right", samples, upm) for g, m in kern1_groups.items() if m[0] in data}
+    c2 = {g: side_category(*data[m[0]], "left", samples, upm) for g, m in kern2_groups.items() if m[0] in data}
     pairs = _class_pairs(font, kern1_groups, kern2_groups, margins, upm=upm, step=step,
                          deadband=deadband, target=target, pinch=pinch, clamp_frac=clamp_frac,
-                         pinch_frac=pinch_frac, mode=mode, ratio=ratio)
+                         pinch_frac=pinch_frac, mode=mode, ratio=ratio, cats1=c1, cats2=c2)
 
     # --- tulis ke UFO ---
     for gname, members in {**kern1_groups, **kern2_groups}.items():

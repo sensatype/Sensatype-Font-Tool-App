@@ -75,6 +75,10 @@ export interface KernMemory {
   fit: "ratio" | "delta" | null;
   residualRatio?: number | null;
   residualDelta?: number | null;
+  catFactors?: Record<string, number>;  // kategori bentuk → faktor thd angka global (1 = sama)
+  catCounts?: Record<string, number>;   // sampel per kategori
+  catRatios?: Record<string, number>;   // faktor × global, siap dibaca manusia
+  catPrior?: number;                    // bobot prior shrinkage
   suggestTracking?: number;      // deltaFrac × irama font ini (unit em)
   rhythm?: number;
   current: number;               // kerapatan yang sedang tersimpan di project ini

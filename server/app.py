@@ -456,11 +456,11 @@ def kern_custom():
 
 
 @app.get("/api/kerning/smart")
-def kern_smart(left: str, right: str, mode: str | None = None):
+def kern_smart(request: Request, left: str, right: str, mode: str | None = None):
     """Saran kern optikal (sadar-bentuk) utk satu pasangan — read-only, tak menulis.
     mode = tight|medium|loose (kerapatan); tak dikenal/kosong → sedang."""
     try:
-        return project.smart_kern(left, right, mode=mode)
+        return project.smart_kern(left, right, mode=mode, user_id=_uid(request))
     except (ValueError, KeyError) as e:
         raise HTTPException(400, f"Smart kern gagal: {e}")
 
@@ -505,11 +505,11 @@ class AutoKern(BaseModel):
 
 
 @app.post("/api/kerning/auto")
-def kern_auto(body: AutoKern):
+def kern_auto(body: AutoKern, request: Request):
     """Auto-kern optikal seluruh pasangan huruf & angka (sadar-bentuk). Aman: onlyEmpty=True."""
     try:
         return project.auto_kern_all(only_empty=body.onlyEmpty, recompile=body.recompile,
-                                     mode=body.mode, ratio=body.ratio)
+                                     mode=body.mode, ratio=body.ratio, user_id=_uid(request))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"Auto-kern gagal: {e}")
 
@@ -595,8 +595,8 @@ class Respace(BaseModel):
 
 
 @app.post("/api/respace")
-def respace(body: Respace):
-    return project.respace(preset=body.preset, keep_custom_kern=body.keepCustomKern,
+def respace(body: Respace, request: Request):
+    return project.respace(preset=body.preset, keep_custom_kern=body.keepCustomKern, user_id=_uid(request),
                            edge_margin=body.edgeMargin)
 
 

@@ -78,10 +78,11 @@ def record(projects_root: Path, user_id, project_id: str, samples: list[dict]) -
     store = u.setdefault("samples", {})
     now = int(time.time())
     for s in ok:
-        store[f"{project_id}|{s['left']} {s['right']}"] = {
-            "b": round(float(s["base"]), 2), "v": round(float(s["value"]), 2),
-            "r": round(float(s["rhythm"]), 2), "at": now,
-        }
+        rec = {"b": round(float(s["base"]), 2), "v": round(float(s["value"]), 2),
+               "r": round(float(s["rhythm"]), 2), "at": now}
+        if s.get("cat"):
+            rec["c"] = str(s["cat"])          # kategori bentuk pasangan, mis. "diagonal×lurus"
+        store[f"{project_id}|{s['left']} {s['right']}"] = rec
     if len(store) > MAX_SAMPLES:           # buang yang terlama
         for k in sorted(store, key=lambda k: store[k].get("at", 0))[: len(store) - MAX_SAMPLES]:
             store.pop(k, None)
@@ -156,4 +157,43 @@ def summary(projects_root: Path, user_id) -> dict:
         # menerapkan rasio aman (pasangan lurus tetap 0, lantai anti-tabrakan tetap menjaga)
         "fit": "delta" if (res_r is None or res_d < res_r * 0.9) else "ratio",
     })
+    if med_r:
+        out.update(_by_category(store, med_r))
     return out
+
+
+# Bobot PRIOR untuk shrinkage. Rasio kategori ditarik ke angka global dgn bobot ini, jadi
+# kategori bersampel 1 hampir seluruhnya mengikuti global (faktor ≈ 1 → perilaku persis seperti
+# sebelum fitur ini ada), dan baru memisah setelah buktinya menumpuk:
+#   n=1 → 20% kategori   n=4 → 50%   n=12 → 75%
+# Tanpa ini satu pasangan nyeleneh bisa mendefinisikan seluruh kategori — persis kegagalan
+# "belajar selera" tersembunyi yang dulu dicabut karena hasilnya tak bisa ditebak.
+_PRIOR = 4.0
+
+
+def _by_category(store: dict, global_ratio: float) -> dict:
+    """Rasio per KATEGORI BENTUK, sudah ditarik ke angka global (shrinkage).
+
+    Yang dikembalikan bukan rasio mutlak melainkan FAKTOR relatif thd global
+    (catFactors[c] = rasio_kategori ÷ rasio_global). Alasannya: tingkat kerapatan keseluruhan
+    adalah urusan project (pengguna menyetelnya di panel), sedangkan yang layak dibawa antar-font
+    hanyalah BEDA antar-bentuk. Faktor 1,0 = kategori itu tak berbeda dari kebiasaan umumnya.
+    """
+    buckets: dict[str, list[float]] = {}
+    for s in store.values():
+        c, b, v = s.get("c"), s.get("b"), s.get("v")
+        if not c or not b or v is None:
+            continue                                   # tanpa kategori / saran 0 → tak memberi rasio
+        r = v / b
+        if r > 0:
+            buckets.setdefault(c, []).append(r)
+    if not buckets:
+        return {}
+    factors, counts = {}, {}
+    for c, rs in buckets.items():
+        n = len(rs)
+        shrunk = (n * statistics.median(rs) + _PRIOR * global_ratio) / (n + _PRIOR)
+        factors[c] = round(shrunk / global_ratio, 3)
+        counts[c] = n
+    return {"catFactors": factors, "catCounts": counts,
+            "catPrior": _PRIOR, "catRatios": {c: round(f * global_ratio, 3) for c, f in factors.items()}}

@@ -587,14 +587,15 @@ class Project:
         specimen_split.split(spec, out_dir, rows_spec=rows_spec, layout=lay)
 
     def _build_ufo_at(self, glyph_dir, ufo_path, family, style, preset, progress=None,
-                      fit_ink=False, zero_kern=False, edge_margin=None):
+                      fit_ink=False, zero_kern=False, edge_margin=None, user_id=None):
         svgs = sorted(Path(glyph_dir).glob("*.svg"))
         # Seed kerning memakai kerapatan yang TERSIMPAN di project (bukan netral) → Re-seed tak lagi
         # membuang selera pengguna. Pada project baru (belum ada meta) keduanya jatuh ke default.
         meta = self._meta()          # project baru (belum ada meta) → {} → mode/ratio default
         smoke_test.build_ufo(svgs, ufo_path, upm=1000, baseline_ratio=0.8,
                              family=family, style=style, autospace=True, kern=True, preset=preset,
-                             kern_mode=self._kern_mode(meta), kern_ratio=self._kern_ratio(meta),
+                             kern_mode=self._kern_mode(meta),
+                             kern_ratio=self._kern_ratio_map(meta, user_id),
                              edge_margin=edge_margin, progress=progress)
         # Jalur IMPORT (pilihan user): mulai bersih agar mudah diatur —
         #   fit_ink  : batas kiri/kanan tiap glyph ke node terluar (LSB=RSB=0).
@@ -745,7 +746,7 @@ class Project:
         return len(written)
 
     @_locked
-    def respace(self, preset=None, keep_custom_kern=True, edge_margin=None):
+    def respace(self, preset=None, keep_custom_kern=True, edge_margin=None, user_id=None):
         meta = self._meta()
         if preset:
             meta["preset"] = preset
@@ -770,7 +771,7 @@ class Project:
             shutil.rmtree(tmp_ufo)
         em = meta.get("edgeMargin")
         self._build_ufo_at(self.glyph_dir, tmp_ufo, meta["family"], meta["masters"][0]["name"],
-                           meta["preset"], edge_margin=em)
+                           meta["preset"], edge_margin=em, user_id=user_id)
         if self.ufo_path.exists():
             shutil.rmtree(self.ufo_path)
         tmp_ufo.rename(self.ufo_path)
@@ -782,7 +783,8 @@ class Project:
             tmp_m = dst.parent / (dst.name + ".reseed")
             if tmp_m.exists():
                 shutil.rmtree(tmp_m)
-            self._build_ufo_at(gdir, tmp_m, meta["family"], m["name"], meta["preset"], edge_margin=em)
+            self._build_ufo_at(gdir, tmp_m, meta["family"], m["name"], meta["preset"],
+                               edge_margin=em, user_id=user_id)
             if dst.exists():
                 shutil.rmtree(dst)
             tmp_m.rename(dst)
@@ -1015,9 +1017,23 @@ class Project:
                 return 0
             base = kerning_mod.baseline_pairs(font, pairs, upm=upm, mode=self._kern_mode())
             g1, g2 = self._kern_groups(font)
-            rows = [{"left": L, "right": R, "base": base[(L, R)], "rhythm": rhythm,
-                     "value": self._resolve_kern(font, g1, g2, L, R)}
-                    for (L, R) in pairs if (L, R) in base]
+            cat_cache = {}
+
+            def _cat(name, side):
+                key = (name, side)
+                if key not in cat_cache:
+                    p = kerning_mod._profiles(font[name]) if name in font else None
+                    cat_cache[key] = kerning_mod.side_category(p[0], p[1], side, 10, upm) if p else None
+                return cat_cache[key]
+
+            rows = []
+            for (L, R) in pairs:
+                if (L, R) not in base:
+                    continue
+                cl, cr = _cat(L, "right"), _cat(R, "left")
+                rows.append({"left": L, "right": R, "base": base[(L, R)], "rhythm": rhythm,
+                             "value": self._resolve_kern(font, g1, g2, L, R),
+                             "cat": f"{cl}×{cr}" if cl and cr else None})
             return kernmem.record(PROJECTS_ROOT, user_id, self.root.name, rows)
         except Exception:                      # noqa: BLE001
             return 0
@@ -1044,6 +1060,26 @@ class Project:
         except Exception:                       # noqa: BLE001 — memori tak boleh menggagalkan impor
             pass
         return meta
+
+    def _kern_ratio_map(self, meta=None, user_id=None):
+        """Kerapatan efektif: ANGKA bila memori belum punya beda antar-bentuk, atau PETA
+        kategori→angka bila sudah.
+
+        Susunannya: skalar project (tingkat kerapatan, disetel pengguna di panel) DIKALI faktor
+        kategori dari memori (beda antar-bentuk, dibawa lintas-font). Kategori tanpa bukti —
+        dan seluruh peta saat memori masih kosong — berfaktor 1, jadi hasilnya persis sama dgn
+        sebelum fitur ini ada. Itu yang membuatnya aman dipasang walau buktinya masih tipis.
+        """
+        base = self._kern_ratio(meta)
+        try:
+            f = (kernmem.summary(PROJECTS_ROOT, user_id) or {}).get("catFactors") or {}
+            if not f:
+                return base
+            out = {c: base * v for c, v in f.items()}
+            out["*"] = base
+            return out
+        except Exception:                       # noqa: BLE001 — memori tak boleh menghalangi kerning
+            return base
 
     def kern_memory(self, user_id=None):
         """Kesimpulan memori lintas-project milik pengguna ini — read-only.
@@ -1191,7 +1227,7 @@ class Project:
             "custom": f"{left} {right}" in self._custom_keys(font),
         }
 
-    def smart_kern(self, left, right, mode=None):
+    def smart_kern(self, left, right, mode=None, user_id=None):
         """Saran kern OPTIKAL (sadar-bentuk) untuk satu pasangan — TIDAK menulis apa pun.
         Menghitung dari geometri outline (bentuk lurus/bulat/menjorok/diagonal menyesuaikan).
         mode = 'tight'/'medium'/'loose' (kerapatan pilihan user; None = sedang).
@@ -1202,10 +1238,10 @@ class Project:
         upm = font.info.unitsPerEm or 1000
         # Kerapatan pribadi ikut DI SINI juga — kalau tidak, saran di editor beda dari yang ditulis
         # "Auto-kern semua", dan pengguna melihat dua angka berbeda untuk pasangan yang sama.
-        ratio = self._kern_ratio()
+        ratio = self._kern_ratio_map(user_id=user_id)
         v = kerning_mod.smart_pair(font, left, right, upm=upm, mode=mode, ratio=ratio)
         return {"left": left, "right": right, "value": int(v),
-                "mode": kerning_mod.resolve_mode(mode), "ratio": ratio}
+                "mode": kerning_mod.resolve_mode(mode), "ratio": self._kern_ratio()}
 
     @_locked
     def shift_all_kerning(self, delta, recompile=False):
@@ -1239,7 +1275,7 @@ class Project:
         return {"cleared": n}
 
     @_locked
-    def auto_kern_all(self, only_empty=True, recompile=True, mode=None, ratio=None):
+    def auto_kern_all(self, only_empty=True, recompile=True, mode=None, ratio=None, user_id=None):
         """Auto-kern optikal SELURUH pasangan KELAS kern font (huruf, aksen, tanda baca, simbol).
 
         Dulu kandidatnya cuma huruf & angka ASCII (62 glyph). Pada font 237 glyph itu menyentuh
@@ -1282,7 +1318,15 @@ class Project:
         spacing_flat = flat < 0.08 * upm
         # Kandidat = SEMUA pasangan kelas kern font. Kuncinya SUDAH level kelas, jadi tak perlu lagi
         # memetakan glyph→grup lalu mendedup kunci yang sama seperti pada jalur ASCII yang lama.
-        pairs = kerning_mod.rekern_classes(font, upm=upm, mode=mode, ratio=ratio)
+        # Peta kategori dibangun dari skalar yang BARU tersimpan → "Timpa semua" dgn ratio
+        # eksplisit tetap memakai angka itu sbg tingkatnya, beda antar-bentuk dari memori.
+        rmap = self._kern_ratio_map(meta, user_id)
+        if isinstance(rmap, dict):
+            rmap = {c: (v / meta.get("kernRatio", 1.0)) * ratio if meta.get("kernRatio") else ratio
+                    for c, v in rmap.items()}
+        else:
+            rmap = ratio
+        pairs = kerning_mod.rekern_classes(font, upm=upm, mode=mode, ratio=rmap)
         written = skipped = preserved = removed = 0
         if not only_empty:
             # SATU lintasan pembersihan sebelum menulis. Dulu tiap kunci membuang bayangannya

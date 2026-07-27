@@ -2194,6 +2194,29 @@ export function GlyphEditor({
                             Karena itu project baru TIDAK dipasangi rasio: angkanya akan menyesatkan.
                           </div>
                         )}
+                        {/* Rincian per BENTUK. Faktor 1,00 = kategori itu belum berbeda dari
+                            kebiasaan umum Anda — ditarik ke sana karena sampelnya masih sedikit. */}
+                        {kmem.enough && kmem.catCounts && Object.keys(kmem.catCounts).length > 0 && (
+                          <div className="flex flex-col gap-0.5 pt-0.5">
+                            <div className="text-[10px] opacity-75">
+                              Per bentuk (ditarik ke angka umum bila sampelnya sedikit):
+                            </div>
+                            <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10px] tabular-nums">
+                              {Object.entries(kmem.catCounts)
+                                .sort((a, b) => b[1] - a[1]).slice(0, 8)
+                                .map(([c, n]) => {
+                                  const fk = kmem.catFactors?.[c] ?? 1;
+                                  const beda = Math.abs(fk - 1) > 0.02;
+                                  return (
+                                    <span key={c} style={{ color: beda ? "var(--accent)" : undefined }}
+                                      title={`${n} pasangan · faktor ${fk.toFixed(2)}× dari kebiasaan umum Anda`}>
+                                      {c} {fk.toFixed(2)}× <span className="opacity-60">n={n}</span>
+                                    </span>
+                                  );
+                                })}
+                            </div>
+                          </div>
+                        )}
                         <div className="flex items-center gap-1.5 pt-0.5">
                           {kmem.enough && kmem.fit === "delta" && kmem.suggestTracking != null && onTracking && (
                             <button className="btn !py-1 !text-[11px]"
