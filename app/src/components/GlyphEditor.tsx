@@ -197,9 +197,13 @@ export function GlyphEditor({
   const [proofXray, setProofXray] = useState(() => localStorage.getItem("ge.xray") === "1");
   const [proofNodes, setProofNodes] = useState(() => localStorage.getItem("ge.nodes") === "1");
   const [proofKernEdit, setProofKernEdit] = useState(() => localStorage.getItem("ge.kernEdit") === "1");
+  // Garis baseline & cap height di kanvas Text. Beda dgn tiga toggle di atas: default MENYALA —
+  // garis acuan itu konteks baca, bukan alat khusus. ("!== '0'" bukan "=== '1'".)
+  const [proofGuides, setProofGuides] = useState(() => localStorage.getItem("ge.proofGuides") !== "0");
   useEffect(() => { localStorage.setItem("ge.xray", proofXray ? "1" : "0"); }, [proofXray]);
   useEffect(() => { localStorage.setItem("ge.nodes", proofNodes ? "1" : "0"); }, [proofNodes]);
   useEffect(() => { localStorage.setItem("ge.kernEdit", proofKernEdit ? "1" : "0"); }, [proofKernEdit]);
+  useEffect(() => { localStorage.setItem("ge.proofGuides", proofGuides ? "1" : "0"); }, [proofGuides]);
   const [proofZoom, setProofZoom] = useState(1); // zoom kanvas Text (⌘/Ctrl+scroll atau tombol)
   const zClamp = (z: number) => Math.min(8, Math.max(0.25, z));
   const glyphCache = useRef<Record<string, GlyphRender>>({}); // SEMUA glyph dimuat sekali → ketik instan
@@ -1574,9 +1578,11 @@ export function GlyphEditor({
           ) : mode === "text" ? (
             // proofTick (state) memicu re-render parent → TextProof baca cache terbaru
             <TextProof text={proofText} charToName={charToName} glyphs={glyphCache.current} kerns={kernCache.current}
-              kernOn={proofKern} upm={d.upm} ascender={d.ascender} descender={d.descender} fontSize={proofSize} loading={proofLoading} tracking={tracking}
+              kernOn={proofKern} upm={d.upm} ascender={d.ascender} descender={d.descender} capHeight={d.capHeight}
+              fontSize={proofSize} loading={proofLoading} tracking={tracking}
               onTextChange={setProofText} bg={cv.bg}
               xray={proofXray} showNodes={proofNodes} kernEdit={proofKernEdit}
+              showGuides={proofGuides} guideCol={cv.gMajor}
               onKernLive={proofKernLive} onKernCommit={proofKernCommit}
               showGrid={showGrid} gMinor={cv.gMinor} gMajor={cv.gMajor} snapStep={snapStep}
               onOutlineLive={proofOutlineLive} onOutlineCommit={proofOutlineCommit}
@@ -2219,7 +2225,9 @@ export function GlyphEditor({
               <ProofToggle on={proofNodes} onClick={() => setProofNodes((v) => !v)} icon={BezierCurve} label="Node"
                 title="Node & handle — KLIK karakter untuk pilih; seret node utk edit (Shift = beberapa)" />
               <ProofToggle on={proofKernEdit} onClick={() => setProofKernEdit((v) => !v)} icon={ArrowsLeftRight} label="Atur kern"
-                title="Seret sebuah glyph mendatar untuk mengatur kerning dengan glyph sebelumnya" />
+                title="Seret sebuah glyph mendatar untuk mengatur kerning dengan glyph sebelumnya. Nilai kern tiap sambungan ikut ditampilkan di bawah baris." />
+              <ProofToggle on={proofGuides} onClick={() => setProofGuides((v) => !v)} icon={Ruler} label="Garis"
+                title="Garis baseline & cap height — warna dan labelnya sama dengan kanvas Contour" />
             </div>
           </>
         ) : (
@@ -2409,13 +2417,17 @@ function KerningCanvas({ left, right, kern, tracking = 0, editValue, onEdit, onC
 
 // Proofing teks: render string sebagai deret glyph (cmap → nama), advance + kerning, multi-baris.
 // X-Ray (outline/rangka), node/handle, dan atur-kerning (seret glyph) — ala Illustrator/Affinity.
-function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, descender, fontSize, loading, tracking = 0, onTextChange, bg = "#fff",
+function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, descender, capHeight = 0, fontSize, loading, tracking = 0, onTextChange, bg = "#fff",
   xray = false, showNodes = false, kernEdit = false, onKernLive, onKernCommit,
+  showGuides = false, guideCol = "#b9c2d0",
   showGrid = false, gMinor = "#dde2eb", gMajor = "#b9c2d0", snapStep = 10, onOutlineLive, onOutlineCommit,
   zoom = 1, onZoom, interact }: {
   text: string; charToName: Record<string, string>;
   glyphs: Record<string, GlyphRender>;
-  kerns: Record<string, number>; kernOn: boolean; upm: number; ascender: number; descender: number; fontSize: number; loading: boolean; tracking?: number;
+  kerns: Record<string, number>; kernOn: boolean; upm: number; ascender: number; descender: number;
+  capHeight?: number;                                    // tinggi kapital SEBENARNYA (bukan taksiran)
+  showGuides?: boolean; guideCol?: string;               // garis baseline & cap height
+  fontSize: number; loading: boolean; tracking?: number;
   onTextChange: (t: string) => void;
   bg?: string; // latar kanvas (ikut palet terang/gelap)
   xray?: boolean; showNodes?: boolean; kernEdit?: boolean;
@@ -2621,6 +2633,33 @@ function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, des
         onPointerUp={() => { upKern(); upNode(); }}
         onPointerLeave={() => { upKern(); upNode(); }}>
         {showGrid && gridEls}
+        {/* GARIS BASELINE & CAP HEIGHT — warna & label mengikuti kanvas Contour (base = aksen,
+            cap = garis kanvas) supaya kedua mode terbaca sama. Melintasi seluruh lebar kanvas,
+            digambar SEBELUM glyph agar tak menutupi tinta. */}
+        {showGuides && (() => {
+          const tsz = (10 * upm) / fs;          // 10 px, konstan di layar
+          const sw = (1 * upm) / fs;
+          const pad = (4 * upm) / fs;
+          return rendered.map((ln, li) => {
+            // capHeight 0/tak masuk akal (mis. font tanpa metrik kapital) → garis cap dilewati,
+            // baseline tetap digambar. Lebih baik satu garis benar drpd dua garis menyesatkan.
+            const capOk = capHeight > 0 && capHeight <= ascender;
+            return (
+              <g key={`gd${li}`} style={{ pointerEvents: "none", userSelect: "none" }}>
+                {capOk && <>
+                  <line x1={0} y1={ln.baseline - capHeight} x2={vbW} y2={ln.baseline - capHeight}
+                    stroke={guideCol} strokeWidth={sw} />
+                  <text x={pad} y={ln.baseline - capHeight - pad} fontSize={tsz} fill={guideCol}
+                    fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">cap {Math.round(capHeight)}</text>
+                </>}
+                <line x1={0} y1={ln.baseline} x2={vbW} y2={ln.baseline}
+                  stroke="var(--accent)" strokeWidth={sw} opacity={0.75} />
+                <text x={pad} y={ln.baseline - pad} fontSize={tsz} fill="var(--accent)" opacity={0.85}
+                  fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">base</text>
+              </g>
+            );
+          });
+        })()}
         {rendered.map((ln, li) => ln.cells.map((c, ci) => {
           if (c.box) return <rect key={`${li}-${ci}`} x={c.x + upm * 0.05} y={ln.baseline - capH} width={Math.max(1, c.advance - upm * 0.1)} height={capH} rx={upm * 0.02} fill="none" stroke="var(--faint)" strokeWidth={upm * 0.012} />;
           const data = c.name ? glyphs[c.name] : null;
