@@ -342,9 +342,9 @@ def _relax_for(strength, clamp_frac, pinch_frac):
     rapat), sehingga menaikkan kekuatan tak menggerakkan apa pun. Dasarnya tetap MUTLAK
     (pinch_frac ≥ 0,15) supaya glyph tak pernah benar-benar bertabrakan.
 
-    Dipakai BERSAMA oleh smart_pair, auto_kern_pairs, dan build_kerning. Dulu hanya auto_kern_pairs
-    yang melakukannya → saran di editor bisa beda dari yang ditulis auto-kern & dari seed Re-seed
-    pada kekuatan >1; itu terbaca sbg "hasilnya tidak konsisten".
+    Dipakai BERSAMA oleh smart_pair dan _class_pairs (seed Re-seed + auto-kern). Dulu hanya jalur
+    auto-kern yang melakukannya → saran di editor bisa beda dari yang ditulis auto-kern & dari
+    seed Re-seed pada kekuatan >1; itu terbaca sbg "hasilnya tidak konsisten".
     """
     if strength > 1.0:
         return clamp_frac * strength, max(0.15, pinch_frac / strength)
@@ -420,47 +420,6 @@ def flat_target(font, upm, step=10, slope=1.0):
     return _flat_target(font, upm, step, slope)
 
 
-def auto_kern_pairs(font, names, *, upm, step=10, slope=1.0, deadband=None,
-                    clamp_frac=0.22, pinch_frac=0.35, target=None, pinch=None, mode=None,
-                    ratio=None):
-    """Kern optikal SADAR-BENTUK (model v3) untuk SEMUA pasangan berurutan dari `names`. Return
-    {(L,R): int} hanya utk |v|>=deadband. TIDAK menulis. Tabel margin per glyph (mentah + cone-fill
-    45°) DIPRAKOMPUTASI SEKALI di grid-y bersama → tiap pasangan tinggal lookup+bobot, bukan scan
-    O(n²) (yg membuat font berkontur rumit makan waktu bermenit & menahan lock tulis)."""
-    if deadband is None:
-        deadband = _deadband(upm)
-    tables = {}  # n -> (tab, bounds); tab: y -> (rawR, filledR, rawL, filledL)
-    for n in names:
-        if n in font:
-            p = _profiles(font[n])
-            if p:
-                tab, b = _glyph_margins(p[0], p[1], step, slope)
-                if tab:
-                    tables[n] = (tab, b)
-    ns = [n for n in names if n in tables]
-    if target is None:
-        target = _flat_target(font, upm, step, slope)
-    if pinch is None:
-        pinch = _flat_pinch(font, upm, step, slope)
-    # Kerapatan hasil = mode (Dekat/Sedang/Jauh) × kerapatan pribadi (diukur dari pasangan yang
-    # disetel pengguna). Keduanya knop yang sama & terlihat di UI — bukan "belajar selera"
-    # tersembunyi seperti mekanisme lama yang hasilnya sulit ditebak.
-    strength = strength_of(mode, ratio)
-    clamp_frac, pinch_frac = _relax_for(strength, clamp_frac, pinch_frac)
-    floor_gap = pinch_frac * pinch
-    out = {}
-    for L in ns:
-        Ltab, Lb = tables[L]
-        Ladv = font[L].width
-        for R in ns:
-            Rtab, Rb = tables[R]
-            pr = _pair_gaps(Ltab, Lb, Ladv, Rtab, Rb, step)
-            k = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap, strength)
-            if k:
-                out[(L, R)] = k
-    return out
-
-
 def baseline_pairs(font, pairs, *, upm, step=10, slope=1.0, deadband=None,
                    clamp_frac=0.22, pinch_frac=0.35, target=None, pinch=None, mode=None):
     """Saran DASAR (ratio = 1,0) utk daftar pasangan tertentu — bahan ukur kerapatan pribadi.
@@ -494,6 +453,135 @@ def baseline_pairs(font, pairs, *, upm, step=10, slope=1.0, deadband=None,
         pr = _pair_gaps(Ltab, Lb, font[L].width, Rtab, Rb, step)
         out[(L, R)] = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap, strength)
     return out
+
+
+def _class_pairs(font, kern1_groups, kern2_groups, margins, *, upm, step, deadband,
+                 target, pinch, clamp_frac, pinch_frac, mode, ratio):
+    """Nilai kern utk SETIAP kombinasi (kelas kiri × kelas kanan). Return {(g1,g2): int} — hanya
+    yang |v| ≥ deadband.
+
+    Bentuk (openness) diukur pada EKSEMPLAR kelas — itu yang menentukan seberapa terbuka pasangan
+    terlihat. Lantai anti-tabrakan TIDAK boleh ikut eksemplar: satu nilai kelas dipakai oleh SETIAP
+    kombinasi anggota, jadi lantai harus aman untuk yang terburuk di antara mereka.
+
+    Terburuk itu diambil sbg SELUBUNG per kelas: di tiap ketinggian y, margin paling menjorok
+    lintas seluruh anggota. Cara lama hanya menguji SATU kandidat — anggota ber-sidebearing
+    tersempit di kiri × tersempit di kanan — dan itu tidak cukup: sidebearing diukur di ekstrem
+    bbox, sementara jarak terdekat yang sebenarnya bergantung pada profil vertikal, sehingga
+    pasangan anggota lain bisa mengunci lebih rapat. Terukur pada Yoruna: kelas beranggota banyak
+    menembus lantai sampai −20 unit pd kerapatan 1,5 dan −39 pd 3,0.
+
+    Selubung sedikit KONSERVATIF (margin terburuk kiri & kanan bisa berasal dari anggota berbeda,
+    jadi ia melindungi pasangan yang mungkin tak ada). Itu arah salah yang benar: nilai kelas
+    memang harus aman utk setiap anggotanya, dan ongkosnya cuma sedikit lebih longgar.
+
+    Dipakai BERSAMA oleh build_kerning (grup baru dari tanda-tangan bentuk) dan rekern_classes
+    (grup yang sudah ada di font) — supaya seed Re-seed & "Timpa semua" tak bisa berbeda hasil.
+    """
+    strength = strength_of(mode, ratio)
+    clamp_frac, pinch_frac = _relax_for(strength, clamp_frac, pinch_frac)
+    floor_gap = pinch_frac * pinch
+
+    def _envelope(members, side):
+        """y → jarak margin TERKECIL lintas anggota kelas (sisi yang berhadapan, ink mentah)."""
+        env = {}
+        for n in members:
+            if n not in margins:
+                continue
+            tab = margins[n][0]
+            adv = font[n].width
+            for y, v in tab.items():
+                d = (adv - v[0]) if side == "right" else v[2]
+                if y not in env or d < env[y]:
+                    env[y] = d
+        return env
+
+    env1 = {g: _envelope(m, "right") for g, m in kern1_groups.items()}
+    env2 = {g: _envelope(m, "left") for g, m in kern2_groups.items()}
+
+    pairs = {}
+    for g1name, m1 in kern1_groups.items():
+        Lname = m1[0]
+        if Lname not in margins:
+            continue
+        Ltab, Lb = margins[Lname]
+        Ladv = font[Lname].width
+        e1 = env1[g1name]
+        for g2name, m2 in kern2_groups.items():
+            Rname = m2[0]
+            if Rname not in margins:
+                continue
+            Rtab, Rb = margins[Rname]
+            pr = _pair_gaps(Ltab, Lb, Ladv, Rtab, Rb, step)
+            if pr is not None:
+                e2 = env2[g2name]
+                # celah nyata terburuk kelas: hanya di ketinggian tempat KEDUA sisi punya ink —
+                # di luar itu anggota mana pun tak bisa bertabrakan.
+                mn = None
+                for y, d in e1.items():
+                    d2 = e2.get(y)
+                    if d2 is not None and (mn is None or d + d2 < mn):
+                        mn = d + d2
+                if mn is not None and mn < pr[2]:
+                    pr = (pr[0], pr[1], mn)
+            k = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap, strength)
+            if k:
+                pairs[(g1name, g2name)] = k
+    return pairs
+
+
+def _exemplar_first(gname, members, margins):
+    """Urutkan anggota kelas agar EKSEMPLAR-nya di depan. Nama grup sudah memuat eksemplar
+    (public.kern1.A → "A"); dipakai bila anggotanya masih ada & punya kontur, karena urutan daftar
+    bisa berubah setelah "Perluas kelas ke aksen" — dan eksemplar yang bergeser diam-diam mengubah
+    bentuk acuan seluruh kelas."""
+    ok = [n for n in members if n in margins]
+    if not ok:
+        return []
+    nm = gname.split(".", 2)[-1]
+    if nm in ok:
+        ok.remove(nm)
+        ok.insert(0, nm)
+    return ok
+
+
+def rekern_classes(font, *, upm, step=10, slope=1.0, deadband=None,
+                   clamp_frac=0.22, pinch_frac=0.35, target=None, pinch=None,
+                   mode=None, ratio=None):
+    """Hitung ulang kern utk SEMUA pasangan kelas memakai grup yang SUDAH ADA di font.
+
+    Menggantikan jalur lama yang kandidatnya cuma huruf & angka ASCII (62 glyph — hanya ≈7% kunci
+    pada font 237 glyph): di sini yang disapu adalah kelas kern yang benar-benar dipakai font,
+    jadi tanda baca, simbol, dan aksen ikut. Beda dgn build_kerning: grup TIDAK dibangun ulang dan
+    spacing tak disentuh, hanya nilainya yang dihitung ulang. Return {(g1,g2): int}. TIDAK menulis.
+    """
+    if deadband is None:
+        deadband = _deadband(upm)
+    k1 = {g: list(m) for g, m in font.groups.items() if g.startswith("public.kern1.")}
+    k2 = {g: list(m) for g, m in font.groups.items() if g.startswith("public.kern2.")}
+    if not k1 or not k2:
+        return {}
+    margins = {}
+    for n in {x for m in list(k1.values()) + list(k2.values()) for x in m}:
+        if n in font:
+            p = _profiles(font[n])
+            if p:
+                tab, b = _glyph_margins(p[0], p[1], step, slope)
+                if tab:
+                    margins[n] = (tab, b)
+    # anggota tanpa kontur dibuang; kelas yang jadi kosong ikut gugur (eksemplar tak boleh glyph
+    # kosong — openness-nya tak terdefinisi & seluruh kelas akan mendapat 0)
+    k1 = {g: v for g, v in ((g, _exemplar_first(g, m, margins)) for g, m in k1.items()) if v}
+    k2 = {g: v for g, v in ((g, _exemplar_first(g, m, margins)) for g, m in k2.items()) if v}
+    if not k1 or not k2:
+        return {}
+    if target is None:
+        target = _flat_target(font, upm, step, slope)
+    if pinch is None:
+        pinch = _flat_pinch(font, upm, step, slope)
+    return _class_pairs(font, k1, k2, margins, upm=upm, step=step, deadband=deadband,
+                        target=target, pinch=pinch, clamp_frac=clamp_frac,
+                        pinch_frac=pinch_frac, mode=mode, ratio=ratio)
 
 
 def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
@@ -537,55 +625,12 @@ def build_kerning(font, glyph_names, *, upm, reference="n", target=None,
     # --- lantai jepit = pecahan irama font itu sendiri (bukan konstanta) ---
     if pinch is None:
         pinch = _flat_pinch(font, upm, step, slope)
+    # --- kern per pasangan kelas (inti yang sama dgn rekern_classes) ---
     # Seed HARUS memakai kekuatan & pelonggaran batas yang sama dgn auto-kern/Smart, kalau tidak
     # setiap Re-seed diam-diam mengembalikan kerapatan ke netral & selera pengguna hilang.
-    strength = strength_of(mode, ratio)
-    clamp_frac, pinch_frac = _relax_for(strength, clamp_frac, pinch_frac)
-    floor_gap = pinch_frac * pinch
-
-    # --- kern per pasangan kelas ---
-    # Bentuk (openness) diukur pada EKSEMPLAR kelas, tapi lantai anti-tabrakan diukur pada anggota
-    # PALING MENONJOL — anggota dgn sidebearing tersempit ke sisi yang berhadapan. Tanpa ini lantai
-    # cuma melindungi eksemplarnya: anggota lain yang inknya lebih menjorok ikut memakai nilai kelas
-    # itu dan bisa benar-benar bertabrakan (terukur pada braceright·less & braceright·plus).
-    def _tightest(members, side):
-        best, bestsb = members[0], None
-        for n in members:
-            if n not in margins:
-                continue
-            tab, b = margins[n]
-            sb = (font[n].width - b[2]) if side == "right" else b[0]   # RSB / LSB
-            if bestsb is None or sb < bestsb:
-                best, bestsb = n, sb
-        return best
-
-    tight1 = {g: _tightest(m, "right") for g, m in kern1_groups.items()}
-    tight2 = {g: _tightest(m, "left") for g, m in kern2_groups.items()}
-
-    pairs = {}
-    for g1name, m1 in kern1_groups.items():
-        Lname = m1[0]
-        if Lname not in margins:
-            continue
-        Ltab, Lb = margins[Lname]
-        Ladv = font[Lname].width
-        Lt2 = margins.get(tight1[g1name])
-        for g2name, m2 in kern2_groups.items():
-            Rname = m2[0]
-            if Rname not in margins:
-                continue
-            Rtab, Rb = margins[Rname]
-            pr = _pair_gaps(Ltab, Lb, Ladv, Rtab, Rb, step)
-            if pr is not None and Lt2 is not None:
-                Rt2 = margins.get(tight2[g2name])
-                if Rt2 is not None and (tight1[g1name] != Lname or tight2[g2name] != Rname):
-                    worst = _pair_gaps(Lt2[0], Lt2[1], font[tight1[g1name]].width,
-                                       Rt2[0], Rt2[1], step)
-                    if worst is not None and worst[2] < pr[2]:
-                        pr = (pr[0], pr[1], worst[2])   # pakai jepit anggota terburuk
-            k = _kern_from_profile(pr, target, upm, deadband, clamp_frac, floor_gap, strength)
-            if k:
-                pairs[(g1name, g2name)] = k
+    pairs = _class_pairs(font, kern1_groups, kern2_groups, margins, upm=upm, step=step,
+                         deadband=deadband, target=target, pinch=pinch, clamp_frac=clamp_frac,
+                         pinch_frac=pinch_frac, mode=mode, ratio=ratio)
 
     # --- tulis ke UFO ---
     for gname, members in {**kern1_groups, **kern2_groups}.items():

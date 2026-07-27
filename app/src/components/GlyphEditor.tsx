@@ -413,8 +413,8 @@ export function GlyphEditor({
       ? "\n\n⚠️ Ada nilai yang belum Anda Terapkan — nilai itu TIDAK ikut tersimpan."
       : "";
     const msg = onlyEmpty
-      ? `Auto-kern optikal pasangan huruf & angka?\n\nKerapatan: ${modeLabel}.${rasio}\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah.${spasi}${pending}\n\nBisa memakan beberapa detik.`
-      : `Auto-kern optikal SEMUA pasangan huruf & angka?\n\nKerapatan: ${modeLabel} — ini yang menentukan rapat/longgarnya hasil.${rasio}\n⚠️ Kerning yang belum Anda tetapkan akan DITIMPA.${lindung}${spasi}${pending}\n\nBisa memakan beberapa detik.`;
+      ? `Auto-kern optikal seluruh pasangan kelas?\n\nKerapatan: ${modeLabel}.${rasio}\nMencakup huruf, aksen, tanda baca, dan simbol.\nHanya MENGISI pasangan yang belum punya kerning — nilai yang sudah Anda atur TIDAK diubah.${spasi}${pending}\n\nSekitar 10–15 detik.`
+      : `Auto-kern optikal SEMUA pasangan kelas?\n\nKerapatan: ${modeLabel} — ini yang menentukan rapat/longgarnya hasil.${rasio}\nMencakup huruf, aksen, tanda baca, dan simbol — SELURUH tabel kerning, bukan huruf & angka saja.\n⚠️ Kerning yang belum Anda tetapkan akan DITIMPA.${lindung}${spasi}${pending}\n\nSekitar 10–15 detik.`;
     if (!confirm(msg)) return;
     setAutoBusy(true);
     try {
@@ -432,9 +432,10 @@ export function GlyphEditor({
           + "lalu auto-kern lagi."
         : "";
       const rk = Math.abs((r.ratio ?? 1) - 1) > 0.005 ? ` · kerapatan Anda ${Math.round(r.ratio * 100)}%` : "";
+      const buang = r.removed > 0 ? ` · ${r.removed} dibuang (nilainya jadi nol / bayangan lama)` : "";
       alert(`Auto-kern selesai (kerapatan: ${modeLabel}${rk}):\n`
-        + `${r.written} pasangan ditulis · ${r.skipped} dilewati\n`
-        + `dari ${r.candidates} glyph huruf/angka.${lindung}${spasi}`);
+        + `${r.written} pasangan kelas ditulis · ${r.skipped} dilewati${buang}\n`
+        + `mencakup ${r.candidates} glyph — huruf, aksen, tanda baca, simbol.${lindung}${spasi}`);
     } catch (e) {
       alert("Auto-kern gagal: " + ((e as Error).message || e));
     } finally {
@@ -1983,11 +1984,13 @@ export function GlyphEditor({
                       onClick={() => { setAutoMenu(false); runAutoKernAll(true); }}>
                       <div className="font-medium">Hanya yang belum diatur (aman)</div>
                       <div className="text-faint mt-0.5">Mengisi pasangan kosong — kerning yang sudah Anda atur tidak diubah</div>
+                      <div className="text-faint mt-0.5 opacity-70">huruf · aksen · tanda baca · simbol · ±10 dtk</div>
                     </button>
                     <button className="text-left text-xs px-2.5 py-2 rounded-lg hover:bg-[var(--bg)]"
                       onClick={() => { setAutoMenu(false); runAutoKernAll(false); }}>
                       <div className="font-medium" style={{ color: "#e8a13a" }}>Timpa semua</div>
-                      <div className="text-faint mt-0.5">Hitung ulang optikal SEMUA pasangan — termasuk yang sudah diatur manual</div>
+                      <div className="text-faint mt-0.5">Hitung ulang optikal SELURUH tabel kerning — termasuk yang sudah diatur manual</div>
+                      <div className="text-faint mt-0.5 opacity-70">huruf · aksen · tanda baca · simbol · ±10 dtk</div>
                     </button>
                     {/* Jawaban atas "sudah saya setel sendiri, kok tidak menular ke yang lain":
                         "Timpa semua" biasa cuma MELINDUNGI pasangan Anda, tak pernah belajar darinya. */}

@@ -1135,9 +1135,16 @@ class Project:
 
     @_locked
     def auto_kern_all(self, only_empty=True, recompile=True, mode=None, ratio=None):
-        """Auto-kern optikal SELURUH pasangan huruf & angka (ASCII, glyph-level).
-        only_empty=True (default) → HANYA mengisi pasangan yang belum punya kerning apa pun
-        (glyph maupun lewat grup) → kerning manual/kelas yang sudah ada TIDAK ditimpa (aman).
+        """Auto-kern optikal SELURUH pasangan KELAS kern font (huruf, aksen, tanda baca, simbol).
+
+        Dulu kandidatnya cuma huruf & angka ASCII (62 glyph). Pada font 237 glyph itu menyentuh
+        1.771 dari 24.460 kunci — 7,2%. Akibatnya "Timpa semua" tak pernah benar-benar menimpa
+        semua, dan kerapatan pribadi seolah tak berpengaruh: 93% tabel tetap di nilai seed.
+        Sekarang yang disapu adalah kelas kern yang BENAR-BENAR dipakai font (sumber yang sama
+        dgn seed Re-seed), jadi cakupannya penuh.
+
+        only_empty=True (default) → HANYA mengisi kunci kelas yang belum ada → kerning yang sudah
+        ada TIDAK ditimpa (aman). only_empty=False → timpa, kecuali pasangan yang Anda tetapkan.
         mode = 'tight'/'medium'/'loose' (kerapatan pilihan user; None = sedang).
         ratio = kerapatan pribadi; None = pakai yang tersimpan di project."""
         font = self._font()
@@ -1151,15 +1158,6 @@ class Project:
             meta["kernRatio"] = round(ratio, 3)
             meta["kernMode"] = cur_mode
             self._save_meta(meta)
-        # Kandidat dibatasi ke huruf & angka ASCII (A–Z a–z 0–9) agar tak meledak (n²).
-        # Varian aksen ikut lewat "Perluas kelas".
-        names = []
-        for n in font.glyphOrder:
-            if n == ".notdef" or n not in font:
-                continue
-            u = font[n].unicode
-            if u and (0x41 <= u <= 0x5A or 0x61 <= u <= 0x7A or 0x30 <= u <= 0x39):
-                names.append(n)
         g1, g2 = self._kern_groups(font)
         # PROVENANCE: pasangan yang ditetapkan pengguna. Dipetakan ke KUNCI KELAS karena di situlah
         # nilainya benar-benar tersimpan — pasangan lain se-kelas menunjuk kunci yang sama, jadi
@@ -1177,50 +1175,51 @@ class Project:
         # menyarankan Re-seed, bukan membiarkan pengguna menebak.
         flat = kerning_mod.flat_target(font, upm)
         spacing_flat = flat < 0.08 * upm
-        pairs = kerning_mod.auto_kern_pairs(font, names, upm=upm, mode=mode, ratio=ratio)
-        written = skipped = preserved = 0
-        done = set()
-        for (L, R), v in pairs.items():
-            lg, rg = g1.get(L), g2.get(R)
-            # tulis LEVEL KELAS bila glyph punya grup (konsisten set_kerning scope='class');
-            # kalau ditulis per-glyph, pasangan itu jadi exception yang MEMBAYANGI edit kelas berikutnya.
-            key = (lg or L, rg or R)
-            if key in done:
-                continue  # anggota grup lain sudah menulis kunci kelas yang sama (nilai ~identik)
-            done.add(key)
+        # Kandidat = SEMUA pasangan kelas kern font. Kuncinya SUDAH level kelas, jadi tak perlu lagi
+        # memetakan glyph→grup lalu mendedup kunci yang sama seperti pada jalur ASCII yang lama.
+        pairs = kerning_mod.rekern_classes(font, upm=upm, mode=mode, ratio=ratio)
+        written = skipped = preserved = removed = 0
+        if not only_empty:
+            # SATU lintasan pembersihan sebelum menulis. Dulu tiap kunci membuang bayangannya
+            # sendiri (anggotaKiri × anggotaKanan) — pada 1.800 kunci itu murah, pada 24.000 kunci
+            # dgn kelas beranggota banyak (sesudah "Perluas kelas") jadi jutaan operasi.
+            for key in list(font.kerning.keys()):
+                if key in custom_keys:
+                    continue                       # milik pengguna → jangan disentuh
+                a, b = key
+                if str(a).startswith("public.kern1.") and str(b).startswith("public.kern2."):
+                    # TIMPA berarti timpa: kunci kelas yang kini jatuh di bawah deadband harus
+                    # HILANG, bukan tertinggal di nilai lama — kalau tidak sebagian tabel tetap
+                    # memakai angka seed dan hasilnya lagi-lagi terasa "tak semuanya berubah".
+                    if key not in pairs:
+                        font.kerning.pop(key, None)
+                        removed += 1
+                elif (a if str(a).startswith("public.kern1.") else g1.get(a)) and \
+                     (b if str(b).startswith("public.kern2.") else g2.get(b)):
+                    # Lebih spesifik dari kunci kelas (exception per-glyph / half-class, §9.6) DAN
+                    # ada kunci kelas yang menaunginya → buang, kalau tidak ia membayangi nilai baru.
+                    # Kunci glyph yang TAK ternaungi kelas mana pun dibiarkan: itu satu-satunya
+                    # tempat nilainya tersimpan.
+                    font.kerning.pop(key, None)
+                    removed += 1
+        for key, v in pairs.items():
             if not only_empty and key in custom_keys:
                 preserved += 1
-                continue  # nilai pengguna = ACUAN yang dipelajari → jangan ditimpa
-            if only_empty:
-                keys = [(L, R)] + ([(lg, R)] if lg else []) + ([(L, rg)] if rg else []) + ([(lg, rg)] if lg and rg else [])
-                if any(k in font.kerning for k in keys):
-                    skipped += 1
-                    continue
-            elif key != (L, R):
-                # mode TIMPA: buang SEMUA exception yang lebih spesifik dari kunci kelas — bukan hanya
-                # (L,R) tapi SETIAP anggota grup kiri×kanan + half-class (§9.6). Kalau tidak, exception
-                # pada anggota lain (mis. Á V, sementara yang diproses A V) membayangi nilai kelas baru
-                # → kern anggota itu tak ikut berubah. Ambil anggota dari font.groups, bukan cuma L/R.
-                lefts = list(font.groups.get(lg, [])) if lg else [L]
-                rights = list(font.groups.get(rg, [])) if rg else [R]
-                for ml in lefts:
-                    for mr in rights:
-                        if (ml, mr) != key:
-                            font.kerning.pop((ml, mr), None)        # per-glyph
-                    if rg and (ml, rg) != key:
-                        font.kerning.pop((ml, rg), None)            # half-class (anggotaKiri, grupKanan)
-                if lg:
-                    for mr in rights:
-                        if (lg, mr) != key:
-                            font.kerning.pop((lg, mr), None)        # half-class (grupKiri, anggotaKanan)
+                continue                           # nilai pengguna = acuan → jangan ditimpa
+            if only_empty and key in font.kerning:
+                skipped += 1
+                continue
             font.kerning[key] = v
             written += 1
-        if written:
+        if written or removed:
             font.save(self.ufo_path, overwrite=True)
             if recompile:
                 self.compile_static()
-        return {"candidates": len(names), "computed": len(pairs), "written": written,
-                "skipped": skipped, "preserved": preserved, "mode": cur_mode, "ratio": ratio,
+        covered = len({n for g, m in font.groups.items() for n in m
+                       if g.startswith("public.kern1.") or g.startswith("public.kern2.")})
+        return {"candidates": covered, "computed": len(pairs), "written": written,
+                "removed": removed, "skipped": skipped, "preserved": preserved,
+                "mode": cur_mode, "ratio": ratio,
                 # spacing font ~0 → kerning mentok batas, hasil nyaris tak bergerak (sarankan Re-seed)
                 "spacingFlat": bool(spacing_flat), "flatTarget": round(flat)}
 

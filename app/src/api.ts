@@ -176,7 +176,7 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ onlyEmpty, recompile: false, mode, ratio }),
     }).then(j<{ candidates: number; computed: number; written: number; skipped: number;
-                preserved: number; mode: KernMode; ratio: number;
+                removed: number; preserved: number; mode: KernMode; ratio: number;
                 spacingFlat: boolean; flatTarget: number }>),
 
   // Ukur KERAPATAN PRIBADI dari pasangan yang sudah Anda setel sendiri — read-only, tak menulis.
