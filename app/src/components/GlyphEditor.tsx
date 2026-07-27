@@ -2478,8 +2478,12 @@ function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, des
     maxW = Math.max(maxW, x);
     return { cells, charX, baseline: ascender + li * lineH };
   });
-  const totalW = Math.max(maxW, upm), totalH = ascender + (lines.length - 1) * lineH + (-descender) + lineH * 0.12;
   const fs = fontSize * zoom; // ukuran efektif = slider × zoom kanvas
+  // Pita nilai kern di bawah garis descender. Dinyatakan dlm UNIT tapi diturunkan dari fs, jadi
+  // tingginya SELALU 18 px di layar berapa pun zoom-nya — tanpa ini label terpotong tepi SVG
+  // saat diperkecil (viewBox dihitung dari totalH).
+  const kernBand = kernEdit ? (18 * upm) / fs : 0;
+  const totalW = Math.max(maxW, upm), totalH = ascender + (lines.length - 1) * lineH + (-descender) + lineH * 0.12 + kernBand;
   const px = (u: number) => (u / upm) * fs;
   // Ukuran SVG = maksimum(konten, area kanvas) → grid & latar mengisi seluruh kanvas walau teks pendek.
   const pxPer = fs / upm;                             // px per unit glyph
@@ -2648,6 +2652,37 @@ function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, des
           <rect key={`k${li}-${ci}`} x={c.x} y={ln.baseline - ascender} width={c.advance} height={ascender - descender}
             fill="transparent" style={{ cursor: "ew-resize" }} onPointerDown={(e) => startKern(c.prevName!, c.name!, e)} />
         ) : null))}
+        {/* NILAI KERN tiap sambungan — angka yang benar-benar diseret, bukan taksiran. Ikut hidup
+            saat digeser karena proofKernLive menulis ke cache lalu memicu render ulang.
+            Ukuran & jarak dinyatakan dlm unit yang diturunkan dari fs → konstan di layar. */}
+        {kernEdit && (() => {
+          const tsz = (11 * upm) / fs;        // 11 px
+          const tick = (4 * upm) / fs;        // garis penanda sambungan
+          const sw = (0.9 * upm) / fs;
+          const drag = kdrag.current;
+          return rendered.map((ln, li) => ln.cells.map((c, ci) => {
+            if (!c.name || !c.prevName) return null;
+            // Sel sebelumnya PASTI glyph prevName: spasi & karakter tak dikenal me-reset `prev`,
+            // jadi prevName hanya terisi bila tetangga langsungnya memang glyph.
+            const p = ln.cells[ci - 1];
+            if (!p) return null;
+            const v = kerns[`${c.prevName} ${c.name}`] ?? 0;
+            const seam = (p.x + p.advance + c.x) / 2;   // titik temu: tepi kanan kiri ↔ tepi kiri kanan
+            const yTop = ln.baseline - descender;       // descender negatif → ini garis paling bawah
+            const active = !!drag && drag.l === c.prevName && drag.r === c.name;
+            const col = active ? "var(--accent)" : v ? "var(--good)" : "var(--faint)";
+            return (
+              <g key={`kv${li}-${ci}`} style={{ pointerEvents: "none", userSelect: "none" }}>
+                <line x1={seam} y1={yTop} x2={seam} y2={yTop + tick} stroke={col} strokeWidth={sw} />
+                <text x={seam} y={yTop + tick + tsz} fontSize={tsz} textAnchor="middle" fill={col}
+                  fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                  fontWeight={active ? 700 : 500}>
+                  {v > 0 ? `+${v}` : String(v)}
+                </text>
+              </g>
+            );
+          }));
+        })()}
         {/* kursor teks (kedip) saat kanvas fokus */}
         {focused && <line x1={caretX} y1={caretBase - ascender} x2={caretX} y2={caretBase - descender}
           stroke="var(--accent)" strokeWidth={upm * 0.016} className="animate-pulse" />}
