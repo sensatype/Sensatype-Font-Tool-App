@@ -147,6 +147,18 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
   function clearTokens() { setTokens({}); }
 
   async function commit() {
+    // Bentuk tanpa nama TIDAK ikut ke font — backend melewatinya. Dulu diam-diam: specimen 350
+    // glyph menghasilkan font 199 glyph tanpa penjelasan apa pun. Deret nama otomatis memang
+    // menyisakan celah di tengah (slot alternate/ligature yang harus dinamai sendiri), jadi pada
+    // specimen besar celah itu bisa ratusan. Ditanyakan dulu, bukan dilaporkan sesudahnya.
+    const tanpaNama = kept.filter((s) => !(tokens[s.id] ?? "").trim()).length;
+    if (tanpaNama > 0) {
+      const ok = confirm(
+        `${tanpaNama} dari ${kept.length} glyph belum diberi nama.\n\n`
+        + `Glyph tanpa nama TIDAK ikut ke font — font akan berisi ${kept.length - tanpaNama} glyph.\n\n`
+        + `Beri nama dulu lewat kolom di bawah tiap glyph (atau "Isi otomatis"), atau lanjutkan tanpa mereka.`);
+      if (!ok) return;
+    }
     setBusy(true); setErr(null); setProg({ pct: 0, phase: "Menyiapkan…" });
     let stop = false;
     // poll progres backend selama commit berjalan (commit & poll dilayani thread berbeda)

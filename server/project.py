@@ -508,13 +508,13 @@ class Project:
     @_locked
     def commit_import(self, tokens, *, family, style, preset=None, user_id=None):
         try:
-            return self._commit_import(tokens, family=family, style=style,
+            return self._commit_import(tokens, family=family, style=style, user_id=user_id,
                                        preset=preset or presets_mod.default_name())
         except Exception as e:
             self._set_progress(0, "Gagal", active=False, error=str(e))
             raise
 
-    def _commit_import(self, tokens, *, family, style, preset):
+    def _commit_import(self, tokens, *, family, style, preset, user_id=None):
         from fontTools.svgLib.path import parse_path
         from fontTools.pens.transformPen import TransformPen
         self._set_progress(2, "Menyiapkan…")
@@ -581,7 +581,12 @@ class Project:
         self._set_progress(82, "Mengompilasi pratinjau…")
         self.compile_preview()
         self._set_progress(100, "Selesai", active=False)
-        return self.state()
+        st = self.state()
+        # Bentuk TANPA nama dilewati di atas (`if not tok: continue`) — dulu tanpa sepatah kata pun,
+        # sehingga specimen 350 glyph diam-diam menghasilkan font 199 glyph dan sisanya "hilang".
+        # Dilaporkan agar UI bisa mengatakannya; pencegahannya ada di wizard (peringatan pra-commit).
+        st["import"] = {"shapes": len(kept), "glyphs": used, "unnamed": len(kept) - used}
+        return st
 
     @staticmethod
     def _split(spec, out_dir, layout, rows):
