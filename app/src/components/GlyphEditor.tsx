@@ -142,6 +142,9 @@ export function GlyphEditor({
   const [kernSelf, setKernSelf] = useState(name ?? ""); // glyph AKTIF pasangan — bisa diganti langsung di toolbar (tanpa klik panel kiri)
   const [kernSide, setKernSide] = useState<"left" | "right">("left"); // sisi glyph AKTIF dlm pasangan
   const [kernVal, setKernVal] = useState(0);
+  // Nilai kern pasangan diambil lewat jaringan; sebelum tiba, kolomnya menampilkan 0 — angka yang
+  // terbaca sbg "pasangan ini memang tak ber-kern", padahal cuma belum termuat. Ditandai.
+  const [kernInfoLoading, setKernInfoLoading] = useState(false);
   const [kernInfo, setKernInfo] = useState<KernInfo | null>(null); // hasil resolusi (grup/exception)
   // Dua menu saja: "Spasi global" (tracking, seragam ke semua pasangan) & "Smart" (kern optikal
   // per-pasangan). Level penyimpanan TIDAK lagi dipilih pengguna — Smart selalu menulis di level
@@ -241,6 +244,10 @@ export function GlyphEditor({
   const proofBusy = useRef(false);
   const [proofTick, setProofTick] = useState(0); // paksa render saat cache terisi
   const [proofLoading, setProofLoading] = useState(false);
+  // Nilai kern menyusul SESUDAH path glyph. Selama itu teks digambar dgn kern 0 → huruf ada di
+  // posisi mentah, lalu BERGESER saat nilainya tiba. Tanpa penanda, pergeseran itu terbaca
+  // sebagai hasil yang salah, bukan sebagai "masih memuat".
+  const [proofKernLoading, setProofKernLoading] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<any>(null);
   const contoursRef = useRef<ContourPoint[][]>([]);
@@ -350,9 +357,10 @@ export function GlyphEditor({
   // di mode lain tak perlu memicu fetch kern; masuk mode Kerning → fetch segar via dep `mode`)
   useEffect(() => {
     if (mode !== "kerning") return;
-    if (!kernLeft || !kernRight || !glyphNames.includes(kernLeft) || !glyphNames.includes(kernRight)) { setKernInfo(null); setKernVal(0); return; }
+    if (!kernLeft || !kernRight || !glyphNames.includes(kernLeft) || !glyphNames.includes(kernRight)) { setKernInfo(null); setKernVal(0); setKernInfoLoading(false); return; }
     let cancel = false;
-    api.getKerning(kernLeft, kernRight).then((k) => { if (!cancel) { setKernInfo(k); const sv = kernScoped(k);
+    setKernInfoLoading(true);
+    api.getKerning(kernLeft, kernRight).finally(() => { if (!cancel) setKernInfoLoading(false); }).then((k) => { if (!cancel) { setKernInfo(k); const sv = kernScoped(k);
       if (sv !== pendingKern.current && !kernDirtyRef.current) setKernVal(sv);        // nilai tertahan JANGAN ditimpa refetch
       else if (sv === pendingKern.current) pendingKern.current = null; } })            // echo tulisan sudah tiba → lepas guard (refetch berikut boleh masuk)
       .catch(() => { if (!cancel) { setKernInfo(null); setKernVal(0); } });
@@ -735,8 +743,16 @@ export function GlyphEditor({
       const need = fontChanged ? [...pairs].filter((p) => !fresh(p))
                                : [...pairs].filter((p) => !(p in kernCache.current));
       if (!need.length) return;
-      const got = await Promise.all(need.map((p) => { const [l, r] = p.split(" "); return api.getKerning(l, r).then((k) => [p, k.value] as const).catch(() => [p, 0] as const); }));
-      for (const e of got) { if (!fresh(e[0])) kernCache.current[e[0]] = e[1]; } // cek ulang saat respons tiba
+      setProofKernLoading(true);
+      try {
+        // SATU permintaan borongan. Dulu satu getKerning per pasangan, dan tiap panggilan membuka
+        // UFO sendiri: teks bawaan (58 sambungan) butuh 24 detik, dan selama itu huruf berdiri di
+        // posisi mentah lalu bergeser. Gagal → jatuh ke 0 spt sebelumnya, jangan menggantung.
+        const got = await api.kernMany(need).catch(() => ({} as Record<string, number>));
+        for (const p of need) { if (!fresh(p)) kernCache.current[p] = got[p] ?? 0; }
+      } finally {
+        setProofKernLoading(false);
+      }
       setProofTick((t) => t + 1);
     }, 120);
     return () => clearTimeout(timer);
@@ -1606,6 +1622,7 @@ export function GlyphEditor({
               showGuides={proofGuides} guideCol={cv.gMajor}
               showGrid={showGrid} gMinor={cv.gMinor} gMajor={cv.gMajor} snapStep={snapStep}
               pickPair onPickPair={(l, r) => { setPickedPair({ l, r }); setKernDirty(false); }}
+              kernLoading={proofKernLoading}
               activePair={kernLeft && kernRight ? { l: kernLeft, r: kernRight } : null}
               zoom={proofZoom} onZoom={(f) => setProofZoom((z) => zClamp(z * f))} interact={proofBusy} />
           ) : mode === "kerning" ? (
@@ -1630,6 +1647,7 @@ export function GlyphEditor({
               fontSize={proofSize} loading={proofLoading} tracking={tracking}
               onTextChange={setProofText} bg={cv.bg}
               xray={proofXray} showNodes={proofNodes} kernEdit={proofKernEdit}
+              kernLoading={proofKernLoading}
               showGuides={proofGuides} guideCol={cv.gMajor}
               onKernLive={proofKernLive} onKernCommit={proofKernCommit}
               showGrid={showGrid} gMinor={cv.gMinor} gMajor={cv.gMajor} snapStep={snapStep}
@@ -2053,7 +2071,7 @@ export function GlyphEditor({
                 Nilai DITAHAN dulu (amber = belum ditetapkan) → tulis saat "Terapkan". */}
             {kernScope === "all"
               ? <Num label={kernDirty ? "Spasi global*" : "Spasi global"} value={trackVal} color={kernDirty ? "#e8a13a" : "var(--accent)"} onCommit={stageKern} title="Spasi global (em) — jarak seragam ke SEMUA pasangan (letter-spacing), berlapis di atas kerning. + renggang, − rapat. Nilai persisten; ikut export." />
-              : <Num label={"Kern" + (kernDirty ? "*" : "")} value={kernVal} color={kernDirty ? "#e8a13a" : "var(--good)"} onCommit={stageKern} title="Nilai kern pasangan ini (em); + renggang, − rapat. Diisi saran optikal Smart, boleh Anda ubah. Klik Terapkan utk menyimpan." />}
+              : <Num label={kernInfoLoading ? "Kern…" : "Kern" + (kernDirty ? "*" : "")} value={kernVal} color={kernDirty ? "#e8a13a" : "var(--good)"} onCommit={stageKern} title="Nilai kern pasangan ini (em); + renggang, − rapat. Diisi saran optikal Smart, boleh Anda ubah. Klik Terapkan utk menyimpan." />}
             {/* DUA menu saja — dua pekerjaan yang benar-benar berbeda:
                 · Spasi global = tracking, satu angka untuk SELURUH font.
                 · Smart        = kern satu pasangan, dihitung optikal dari bentuk.
@@ -2577,7 +2595,7 @@ function KerningCanvas({ left, right, kern, tracking = 0, editValue, onEdit, onC
 function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, descender, capHeight = 0, fontSize, loading, tracking = 0, onTextChange, bg = "#fff",
   xray = false, showNodes = false, kernEdit = false, onKernLive, onKernCommit,
   showGuides = false, guideCol = "#b9c2d0",
-  pickPair = false, onPickPair, activePair = null,
+  pickPair = false, onPickPair, activePair = null, kernLoading = false,
   showGrid = false, gMinor = "#dde2eb", gMajor = "#b9c2d0", snapStep = 10, onOutlineLive, onOutlineCommit,
   zoom = 1, onZoom, interact }: {
   text: string; charToName: Record<string, string>;
@@ -2590,6 +2608,7 @@ function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, des
   pickPair?: boolean;
   onPickPair?: (left: string, right: string) => void;
   activePair?: { l: string; r: string } | null;
+  kernLoading?: boolean;   // nilai kern belum lengkap → posisi huruf masih akan bergeser
   fontSize: number; loading: boolean; tracking?: number;
   onTextChange: (t: string) => void;
   bg?: string; // latar kanvas (ikut palet terang/gelap)
@@ -2782,6 +2801,14 @@ function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, des
       {!text && (
         <div className="absolute left-16 top-5 text-faint text-sm pointer-events-none select-none">
           Klik di sini lalu ketik langsung — atau gunakan kolom di bawah.
+        </div>
+      )}
+      {/* Nilai kern menyusul sesudah bentuk glyph: sampai lengkap, huruf berdiri di posisi mentah
+          dan AKAN bergeser. Dikatakan apa adanya supaya pergeseran itu tak terbaca sbg hasil salah. */}
+      {kernLoading && (
+        <div className="absolute left-16 top-3 text-[11px] px-2 py-1 rounded flex items-center gap-1.5 pointer-events-none select-none"
+             style={{ background: "var(--bg-2)", border: "1px solid var(--border)", color: "#e8a13a" }}>
+          <CircleNotch className="size-3 animate-spin" /> memuat kerning — posisi huruf belum final
         </div>
       )}
       {text && (xray || showNodes) && !kernEdit && selCells.size === 0 && (

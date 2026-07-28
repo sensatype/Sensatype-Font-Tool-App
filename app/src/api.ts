@@ -150,6 +150,14 @@ export const api = {
     fetch(`${BASE}/kerning/list?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ""}`)
       .then(j<{ pairs: KernListEntry[]; total: number; matched: number }>),
 
+  // Nilai kern BANYAK pasangan sekaligus (pratinjau teks). Satu permintaan, satu kali buka font —
+  // menggantikan N getKerning yang masing-masing membuka UFO.
+  kernMany: (pairs: string[]) =>
+    fetch(`${BASE}/kerning/batch`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pairs }),
+    }).then(j<Record<string, number>>),
+
   // Berapa pasangan yang sudah DITETAPKAN pengguna — acuan belajar "Timpa semua". Read-only.
   // Status kerning: berapa pasangan milik Anda + apakah spacing sudah siap. Read-only.
   kernStatus: () => fetch(`${BASE}/kerning/custom`).then(

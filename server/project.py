@@ -1235,6 +1235,25 @@ class Project:
             "custom": f"{left} {right}" in self._custom_keys(font),
         }
 
+    def kern_many(self, pairs):
+        """Nilai kern EFEKTIF untuk BANYAK pasangan sekaligus → {"L R": int}.
+
+        get_kern membuka UFO tiap panggilan. Pratinjau teks butuh satu nilai per sambungan, jadi
+        teks 12 baris = 58 permintaan = 58 kali buka font — terukur 24 detik, dan selama itu huruf
+        berdiri di posisi mentah lalu bergeser. Di sini font dibuka SEKALI dan seluruh pasangan
+        diselesaikan dari peta grup yang sama.
+        """
+        font = self._font()
+        g1, g2 = self._kern_groups(font)
+        out = {}
+        for key in pairs or []:
+            parts = str(key).split(" ")
+            if len(parts) != 2:
+                continue
+            L, R = parts
+            out[key] = self._resolve_kern(font, g1, g2, L, R) if (L in font and R in font) else 0
+        return out
+
     def smart_kern(self, left, right, mode=None, user_id=None):
         """Saran kern OPTIKAL (sadar-bentuk) untuk satu pasangan — TIDAK menulis apa pun.
         Menghitung dari geometri outline (bentuk lurus/bulat/menjorok/diagonal menyesuaikan).

@@ -473,6 +473,17 @@ def kern_smart(request: Request, left: str, right: str, mode: str | None = None)
         raise HTTPException(400, f"Smart kern gagal: {e}")
 
 
+class KernMany(BaseModel):
+    pairs: list[str] = []
+
+
+@app.post("/api/kerning/batch")
+def kern_batch(body: KernMany):
+    """Nilai kern banyak pasangan dalam SATU permintaan (pratinjau teks). Menggantikan N request
+    yang masing-masing membuka UFO — terukur 58 pasangan: 24 detik → satu kali buka font."""
+    return project.kern_many(body.pairs)
+
+
 @app.put("/api/kerning")
 def kern(body: Kern, request: Request):
     try:
