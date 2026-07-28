@@ -391,8 +391,12 @@ class Project:
         kept = [s for s in st["shapes"] if not s.get("excluded")]
         auto = self._auto_tokens(len(kept))
         return {
+            # `parts` = jumlah path penyusun. >1 berarti objek ini gabungan — entah dari <g>
+            # di SVG asal (otomatis saat impor) atau dari tombol Gabung. Dipakai UI utk
+            # memberi tahu bahwa pengelompokan terbaca, tanpa perlu weld di aplikasi gambar.
             "shapes": [{"id": s["id"], "d": " ".join(s["paths"]), "bbox": s["bbox"],
-                        "band": s["band"], "excluded": s.get("excluded", False)}
+                        "band": s["band"], "excluded": s.get("excluded", False),
+                        "parts": len(s["paths"])}
                        for s in st["shapes"]],
             "guides": st.get("guides", []),
             "viewBox": st.get("viewBox", [0, 0, 1, 1]),

@@ -62,10 +62,69 @@ def load_layout(name_or_path):
     return rows, kinds
 
 
+_SHAPE_TAGS = {"path", "rect", "circle", "ellipse", "polygon", "polyline", "line"}
+_MAX_PARTS = 12       # >12 bagian = layer/baris, bukan satu karakter
+_MAX_GROUP_W = 4.0    # lebar grup maksimum, dalam kelipatan tinggi acuan baris
+
+
+def _mark_groups(root, raw):
+    """Tandai path yang di-<g>-kan perancang dgn id sintetis → {id: nomor grup}.
+
+    Supaya satu karakter berbagian banyak (batang + titik huruf i, aksen, stroke yang belum
+    disatukan) tak perlu di-weld dulu di aplikasi gambar: cukup di-GROUP, dan impor
+    memperlakukannya sebagai satu objek.
+
+    Lewat atribut `id` karena topicosvg() MERATAKAN <g> — itu memang gunanya (transform,
+    <use>, dan bentuk non-path ikut diselesaikan) — dan `id` satu-satunya jejak yang selamat
+    menyeberang. Grup yang dipakai adalah yang TERDALAM memuat ≥2 bentuk: Illustrator
+    membungkus hampir tiap objek dalam <g> sendiri (di Yoruna Black: 494 <g> untuk 237 path),
+    jadi <g> berisi 1 bentuk cuma pembungkus, sedangkan <g> terluar memuat seluruh lembar.
+    """
+    # id yang dirujuk di tempat lain (<use href="#x">, url(#x)) tak boleh ditimpa — path itu
+    # dilewati saja. Pola sengaja longgar: kelebihan melindungi hanya berarti lebih sedikit
+    # grup yang dikenali, tak pernah berarti gambar rusak.
+    protected = set(re.findall(r"#([A-Za-z_][\w.:-]*)", raw))
+    mark = "sgz"
+    while mark in raw:                      # jaminan tak bentrok dgn id yang sudah ada
+        mark += "z"
+    keys, seq = {}, [0]
+
+    def walk(el, is_group):
+        """→ daftar bentuk di subtree ini yang belum diklaim grup mana pun."""
+        pending = []
+        for c in el:
+            tag = c.tag.split("}")[-1]
+            if tag == "defs":
+                continue                    # isi <defs> cuma cetakan, bukan glyph
+            if tag == "g":
+                pending += walk(c, True)
+            elif tag in _SHAPE_TAGS:
+                if c.get("id") in protected:
+                    return []               # anggota terkunci → jangan kelompokkan grup ini
+                pending.append(c)
+        if is_group and 2 <= len(pending) <= _MAX_PARTS:
+            seq[0] += 1
+            for i, sh in enumerate(pending):
+                mid = f"{mark}{seq[0]}.{i}"
+                sh.set("id", mid)
+                keys[mid] = seq[0]
+            return []
+        return pending                      # terlalu besar/kecil → biar grup luar yang coba
+
+    walk(root, False)
+    return keys
+
+
 def _load_paths(svg_file):
+    """→ (items, vb) dgn item = (bbox, d, grup); grup 0 = path berdiri sendiri."""
     raw = FsPath(svg_file).read_text(encoding="utf-8")
     raw = re.sub(r"(?<=[\d.])(px|pt)\b", "", raw)
-    svg = SVG.fromstring(raw).topicosvg(drop_unsupported=True)
+    doc = SVG.fromstring(raw)
+    try:
+        gkeys = _mark_groups(doc.svg_root, raw)
+    except Exception:
+        gkeys = {}          # penandaan gagal → perilaku lama, bukan impor yang gagal
+    svg = doc.topicosvg(drop_unsupported=True)
     vb = svg.view_box()
     items = []
     for s in svg.shapes():
@@ -78,13 +137,14 @@ def _load_paths(svg_file):
         except Exception:
             continue
         if p.bounds:
-            items.append((p.bounds, d))  # bounds Y-down (x0,y0,x1,y1)
+            g = gkeys.get(str(getattr(s, "id", "") or ""), 0)
+            items.append((p.bounds, d, g))  # bounds Y-down (x0,y0,x1,y1)
     return items, vb
 
 
 def _detect_rows(items, vb, row_gap_frac=0.045, n_rows=None):
     H = vb[3]
-    ycenters = sorted(set((b[1] + b[3]) / 2 for b, _ in items))
+    ycenters = sorted(set((b[1] + b[3]) / 2 for b, *_ in items))
     if n_rows and n_rows < len(ycenters):
         # known-count: pecah jadi tepat n_rows band via (n_rows-1) gap-y terbesar
         gaps = sorted(
@@ -98,16 +158,16 @@ def _detect_rows(items, vb, row_gap_frac=0.045, n_rows=None):
         groups.append(ycenters[start:])
         centers = [sum(g) / len(g) for g in groups]
         rows = defaultdict(list)
-        for b, d in items:
-            yc = (b[1] + b[3]) / 2
+        for it in items:                     # item diteruskan UTUH — kunci grup ikut
+            yc = (it[0][1] + it[0][3]) / 2
             ri = min(range(len(centers)), key=lambda i: abs(centers[i] - yc))
-            rows[ri].append((b, d))
+            rows[ri].append(it)
         return rows, centers
 
     # AUTO: deteksi baris via STRIP-Y TERISI (interval ink yang overlap = satu baris).
     # Robust thd variasi tinggi glyph dalam satu baris (diakritik tinggi, descender rendah)
     # — tidak memecah baris fisik seperti clustering y-center.
-    intervals = sorted((b[1], b[3]) for b, _ in items)  # (yMin, yMax), Y-down
+    intervals = sorted((b[1], b[3]) for b, *_ in items)  # (yMin, yMax), Y-down
     bands = [list(intervals[0])]
     for y0, y1 in intervals[1:]:
         if y0 <= bands[-1][1] + H * 0.006:  # overlap / nyaris menempel → baris sama
@@ -115,11 +175,11 @@ def _detect_rows(items, vb, row_gap_frac=0.045, n_rows=None):
         else:
             bands.append([y0, y1])
     rows = defaultdict(list)
-    for b, d in items:
-        yc = (b[1] + b[3]) / 2
+    for it in items:                         # item diteruskan UTUH — kunci grup ikut
+        yc = (it[0][1] + it[0][3]) / 2
         ri = next((i for i, (lo, hi) in enumerate(bands) if lo <= yc <= hi),
                   min(range(len(bands)), key=lambda i: abs((bands[i][0] + bands[i][1]) / 2 - yc)))
-        rows[ri].append((b, d))
+        rows[ri].append(it)
     return rows, [(lo + hi) / 2 for lo, hi in bands]
 
 
@@ -128,12 +188,58 @@ def _gap_groups(row, gap):
     row = sorted(row, key=lambda t: t[0][0])
     groups = [[row[0]]]
     mx = row[0][0][2]
-    for b, d in row[1:]:
+    for it in row[1:]:
+        b = it[0]
         if b[0] - mx > gap:
             groups.append([])
-        groups[-1].append((b, d))
+        groups[-1].append(it)
         mx = max(mx, b[2])
     return groups
+
+
+def _merge_groups(row, ref_h, gtotal):
+    """Satukan path se-<g> jadi SATU objek. → [(bbox, [d, ...])] urut seperti masukan.
+
+    Grup cuma dihormati kalau masuk akal sebagai satu karakter:
+      • seluruh anggotanya ada di baris ini (grup yang menyeberang baris = layer, bukan glyph);
+      • lebarnya ≤ _MAX_GROUP_W × tinggi acuan baris;
+      • tak ada objek lain yang terlangkahi.
+    Kalau ditolak, tiap path berdiri sendiri persis seperti sebelum fitur ini ada — dan masih
+    bisa dirapikan manual lewat Gabung/Pisah di langkah 2.
+    """
+    by_g = defaultdict(list)
+    for it in row:
+        if it[2]:
+            by_g[it[2]].append(it)
+    centers = [((it[0][0] + it[0][2]) / 2, it[2]) for it in row]
+    ok = set()
+    for g, members in by_g.items():
+        if len(members) < 2 or len(members) != gtotal.get(g, 0):
+            continue                          # sebagian anggota jatuh di baris lain
+        x0 = min(m[0][0] for m in members)
+        x1 = max(m[0][2] for m in members)
+        if ref_h <= 0 or (x1 - x0) > _MAX_GROUP_W * ref_h:
+            continue
+        # Ada karakter LAIN yang pusatnya di dalam rentang grup → grup melangkahinya. Menggabung
+        # di sini akan menggeser urutan baca tanpa terlihat, jadi lebih baik tak dihormati.
+        if any(og != g and x0 < cx < x1 for cx, og in centers):
+            continue
+        ok.add(g)
+
+    out, done = [], set()
+    for it in row:                            # urutan masukan dijaga; posisi = anggota pertama
+        g = it[2]
+        if g not in ok:
+            out.append((it[0], [it[1]]))
+            continue
+        if g in done:
+            continue
+        done.add(g)
+        ms = by_g[g]
+        out.append(((min(m[0][0] for m in ms), min(m[0][1] for m in ms),
+                     max(m[0][2] for m in ms), max(m[0][3] for m in ms)),
+                    [m[1] for m in ms]))
+    return out
 
 
 def extract_shapes(svg_file, *, cap_target=700):
@@ -146,6 +252,9 @@ def extract_shapes(svg_file, *, cap_target=700):
     items, vb = _load_paths(svg_file)
     if not items:
         return {"shapes": [], "guides": [], "viewBox": [0, 0, 1, 1]}
+    gtotal = defaultdict(int)                # anggota per grup di SELURUH lembar
+    for it in items:
+        gtotal[it[2]] += 1
     rows, _centers = _detect_rows(items, vb)
     rows_ordered = [rows[ri] for ri in sorted(rows)]
 
@@ -164,14 +273,17 @@ def extract_shapes(svg_file, *, cap_target=700):
             cap_y = base_row - capH
         else:  # specimen tak terbaca (tanpa baris acuan) → perilaku lama, per-baris
             base_row = _row_baseline(row)
-            maxh = max(b[3] - b[1] for b, _ in row)
-            tall_tops = [b[1] for b, _ in row if (b[3] - b[1]) >= 0.55 * maxh]
-            cap_y = min(tall_tops) if tall_tops else min(b[1] for b, _ in row)
+            maxh = max(b[3] - b[1] for b, *_ in row)
+            tall_tops = [b[1] for b, *_ in row if (b[3] - b[1]) >= 0.55 * maxh]
+            cap_y = min(tall_tops) if tall_tops else min(b[1] for b, *_ in row)
         guides.append({"y": round(base_row, 1), "type": "baseline"})
         guides.append({"y": round(cap_y, 1), "type": "cap"})
-        for b, d in row:
-            shapes.append({"paths": [d], "band": band,
-                           "bbox": [round(b[0], 1), round(b[1], 1), round(b[2], 1), round(b[3], 1)]})
+        # Garis panduan di ATAS sengaja dihitung dari bentuk yang BELUM digabung, supaya
+        # baseline/cap persis sama seperti sebelum fitur grup ada.
+        ref_h = capH or (max(b[3] - b[1] for b, *_ in row) if row else 0)
+        for bb, parts in _merge_groups(row, ref_h, gtotal):
+            shapes.append({"paths": parts, "band": band,
+                           "bbox": [round(bb[0], 1), round(bb[1], 1), round(bb[2], 1), round(bb[3], 1)]})
     shapes.sort(key=lambda s: (s["band"], (s["bbox"][0] + s["bbox"][2]) / 2))
     return {"shapes": shapes, "guides": guides, "viewBox": list(vb)}
 
@@ -200,10 +312,10 @@ def _cluster(row, n):
 def _row_baseline(group):
     """Baseline baris = median yMax glyph TINGGI (huruf/kurung/$/€ bertumpu baseline),
     abaikan simbol kecil yang melayang (bullet, derajat, kutip, dash) agar penempatan benar."""
-    heights = [b[3] - b[1] for b, _ in group]
+    heights = [b[3] - b[1] for b, *_ in group]
     maxh = max(heights) if heights else 0
-    tall = [b[3] for b, _ in group if (b[3] - b[1]) >= 0.55 * maxh]
-    return statistics.median(tall) if tall else statistics.median(b[3] for b, _ in group)
+    tall = [b[3] for b, *_ in group if (b[3] - b[1]) >= 0.55 * maxh]
+    return statistics.median(tall) if tall else statistics.median(b[3] for b, *_ in group)
 
 
 def _cap_reference(row):
@@ -219,9 +331,9 @@ def _cap_reference(row):
     if not row:
         return None
     ordered = sorted(row, key=lambda t: (t[0][0] + t[0][2]) / 2)  # kiri → kanan
-    heights = [b[3] - b[1] for b, _ in ordered]
+    heights = [b[3] - b[1] for b, *_ in ordered]
     maxh = max(heights) if heights else 0
-    tall = [b for b, _ in ordered if (b[3] - b[1]) >= 0.55 * maxh]
+    tall = [b for b, *_ in ordered if (b[3] - b[1]) >= 0.55 * maxh]
     if not tall:
         return None
     top = statistics.median(b[1] for b in tall)  # garis cap mayoritas (huruf bertutup rata)
@@ -261,9 +373,9 @@ def _row_baselines(rows_ordered, capH):
     base = [None] * n
     center = []
     for i, row in enumerate(rows_ordered):
-        ys = [(b[1] + b[3]) / 2 for b, _ in row]
+        ys = [(b[1] + b[3]) / 2 for b, *_ in row]
         center.append(statistics.median(ys) if ys else 0.0)
-        maxh = max((b[3] - b[1]) for b, _ in row) if row else 0
+        maxh = max((b[3] - b[1]) for b, *_ in row) if row else 0
         if maxh >= 0.45 * capH:
             base[i] = _row_baseline(row)
     known = [i for i in range(n) if base[i] is not None]
@@ -306,11 +418,11 @@ def _emit_row(row_items, cells, *, scale, base_row, baseY, upm, margin, out, see
             print(f"  ⚠ cell dobel {cell!r} dilewati (sudah dipakai)")
             continue
         seen.add(cell)
-        gx0 = min(b[0] for b, _ in group)
-        gx1 = max(b[2] for b, _ in group)
+        gx0 = min(b[0] for b, *_ in group)
+        gx1 = max(b[2] for b, *_ in group)
         ex = margin - gx0 * scale
         paths = []
-        for (b, d) in group:
+        for b, d, *_ in group:
             spen = SVGPathPen(None)
             parse_path(d, TransformPen(spen, (scale, 0, 0, scale, ex, fy)))
             paths.append(f'<path fill-rule="evenodd" d="{spen.getCommands()}"/>')
@@ -342,8 +454,8 @@ def split(svg_file, out_dir, *, rows_spec=("upper", "lower"), layout=None, upm=1
 
     # skala global dari cap height baris kapital (row 0 = baris paling atas)
     up = sorted(rows[0], key=lambda t: (t[0][0] + t[0][2]) / 2)
-    base0 = statistics.median(b[3] for b, _ in up)
-    captop = min(b[1] for b, _ in up)
+    base0 = statistics.median(b[3] for b, *_ in up)
+    captop = min(b[1] for b, *_ in up)
     scale = cap_target / (base0 - captop)
 
     # tentukan codepoint per baris fisik

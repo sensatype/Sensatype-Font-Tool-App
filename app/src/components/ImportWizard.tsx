@@ -50,6 +50,9 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
   useEffect(() => { localStorage.setItem("sc.guideMode", guideMode); }, [guideMode]);
 
   const kept = useMemo(() => (staging?.shapes ?? []).filter((s) => !s.excluded), [staging]);
+  // Objek yang tersusun dari >1 path — datang dari <g> di SVG asal, atau dari tombol Gabung.
+  // Ditampilkan supaya terlihat bahwa mengelompokkan di aplikasi gambar sudah cukup (tak perlu weld).
+  const grouped = useMemo(() => kept.filter((s) => (s.parts ?? 1) > 1).length, [kept]);
 
   // resume: jika ada staging tersimpan (belum di-commit), lanjut ke langkah Bersihkan
   useEffect(() => {
@@ -214,6 +217,7 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
               : <div className="flex flex-col items-center gap-3"><UploadSimple className="size-10 text-accent" />
                   <div className="font-medium text-base">Jatuhkan 1 SVG / PDF specimen</div>
                   <div className="text-muted text-xs">SVG atau PDF vektor · semua glyph ditampilkan dulu untuk dibersihkan & dipetakan</div>
+                  <div className="text-faint text-[11px]">Karakter berbagian banyak cukup di-<b>group</b> di aplikasi gambar — tak perlu di-weld</div>
                   <div className="btn btn-accent mt-2">Pilih file</div></div>}
             <input ref={fileRef} type="file" accept=".svg,.pdf,image/svg+xml,application/pdf" hidden onChange={(e) => e.target.files?.[0] && doStage(e.target.files[0])} />
           </div>
@@ -232,7 +236,7 @@ export function ImportWizard({ onImported, onHome }: { onImported: (s: ProjectSt
         <WizardBar step={2}
           left={<button className="btn" onClick={() => setStep("upload")}><ArrowLeft className="size-4" />Ulang</button>}
           right={<button className="btn btn-accent" onClick={() => { autoFill(); setStep("map"); }}>Lanjut: petakan <ArrowRight className="size-4" /></button>}
-          title="Bersihkan" sub={`${kept.length} glyph akan diimpor · ${staging?.shapes.length ?? 0} objek terdeteksi`} />
+          title="Bersihkan" sub={`${kept.length} glyph akan diimpor · ${staging?.shapes.length ?? 0} objek terdeteksi${grouped ? ` · ${grouped} objek gabungan` : ""}`} />
         <div className="px-4 py-2 border-b flex items-center gap-2 flex-wrap" style={{ borderColor: "var(--border)", background: "var(--bg-2)" }}>
           <span className="text-xs text-muted mr-1">{sel.size} dipilih</span>
           <button className="btn !py-1.5" disabled={!sel.size} onClick={() => op("exclude", [...sel])} title={`Buang objek terpilih (${kc("delete")})`}><Trash className="size-4" />Buang</button>

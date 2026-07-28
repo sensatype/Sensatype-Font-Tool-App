@@ -181,6 +181,7 @@ export interface StagedShape {
   bbox: [number, number, number, number];
   band: number;
   excluded: boolean;
+  parts?: number; // path penyusun; >1 = objek gabungan (dari <g> di SVG, atau tombol Gabung)
 }
 
 export interface StagedGuide {
