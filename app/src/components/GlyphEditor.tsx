@@ -2041,7 +2041,11 @@ export function GlyphEditor({
             {/* Teks uji BERSAMA dgn mode Text (tersimpan di project). Diisi → kanvas menampilkan
                 teksnya dan sambungan antar-huruf bisa diklik; dikosongkan → kembali ke kanvas
                 dua-glyph. Tanpa batas panjang. */}
-            <input className="field !py-1.5 !w-44 text-sm" value={proofText}
+            {/* TEXTAREA, bukan input: <input> MEMBUANG newline (spec HTML menyanitasi CR/LF), jadi
+                mengetik satu huruf di sini akan meratakan teks 12 baris jadi satu lalu menyimpannya.
+                Terukur pd teks bawaan: 113 → 102 karakter, 11 newline lenyap. rows=1 + resize-none
+                membuatnya tetap setipis kolom biasa. */}
+            <textarea className="field !py-1.5 !w-44 text-sm resize-none leading-tight" rows={1} value={proofText}
               onChange={(e) => setProofText(e.target.value)}
               placeholder="teks uji (bersama mode Text)"
               title="Teks yang sama dengan mode Text, tersimpan di project. Isi → kanvas menampilkan teksnya, klik di antara dua huruf untuk memilih pasangan. Kosongkan → kembali ke kanvas dua-glyph." />
@@ -2348,6 +2352,17 @@ export function GlyphEditor({
           <>
             <textarea className="field !py-1.5 flex-1 min-w-[200px] resize-none text-sm" rows={2} value={proofText}
               onChange={(e) => setProofText(e.target.value)} placeholder="Ketik di kolom ini atau LANGSUNG di kanvas (klik kanvas lalu ketik) · Enter = baris baru" />
+            {/* Bawaan hanya muncul selama project belum pernah punya teks — sekali diketik, ia tak
+                kembali sendiri. Tanpa jalan pulih ini, mengosongkan kolom = kehilangan deret uji
+                itu selamanya. Teksnya diambil dari server agar tak ada salinan yang bisa tertinggal. */}
+            <button className="btn !py-1.5 shrink-0"
+              onClick={async () => {
+                try { setProofText((await api.proofTextDefault()).text); }
+                catch (e) { alert("Gagal memuat contoh: " + ((e as Error).message || e)); }
+              }}
+              title="Pulihkan deret uji bawaan — pasangan diagonal (A/V/W/X/Y/Z/T), kasus kerning tersulit">
+              Contoh
+            </button>
             <label className="flex flex-col gap-1 shrink-0" title="Ukuran tampilan (px)">
               <span className="label">Ukuran {proofSize}px</span>
               <input type="range" min={24} max={240} value={proofSize} onChange={(e) => setProofSize(Number(e.target.value))} className="w-28" />

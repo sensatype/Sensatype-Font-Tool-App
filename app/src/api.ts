@@ -212,6 +212,9 @@ export const api = {
 
   glyphsRender: () => fetch(`${BASE}/glyphs/render`).then(j<{ glyphs: Record<string, GlyphRender> }>),
 
+  // Teks uji BAWAAN (deret pasangan diagonal) — untuk tombol "pulihkan contoh".
+  proofTextDefault: () => fetch(`${BASE}/proof-text/default`).then(j<{ text: string }>),
+
   // Teks uji project (dipakai bersama mode Text & Kerning). Tanpa batas panjang.
   setProofText: (text: string) =>
     fetch(`${BASE}/proof-text`, {

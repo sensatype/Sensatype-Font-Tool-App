@@ -1587,6 +1587,25 @@ class Project:
         self._save_meta(meta)
         return self.state()
 
+    # Teks uji BAWAAN — deret pasangan diagonal (A/V/W/X/Y/Z/T), kasus kerning tersulit: flank
+    # terbuka saling berhadapan, di situlah spasi optik paling sering meleset. Dipakai hanya
+    # selama project BELUM PERNAH punya teks; begitu pengguna mengetik (termasuk mengosongkan
+    # sampai kosong), pilihannya yang dipakai — bawaan tak pernah muncul lagi menimpa.
+    DEFAULT_PROOF_TEXT = (
+        "AA\n"
+        "AVAIBLE\n"
+        "AWAIRLE\n"
+        "AXAIPLE\n"
+        "AYAIDLE\n"
+        "VVWWXXYYZZ\n"
+        "VWVXVYVZ\n"
+        "WVWXWYWZ\n"
+        "XVXWXYXZ\n"
+        "YVYWYXYZ\n"
+        "TA RA FA TT LA EA\n"
+        "TVTWTXTYTZ Th"
+    )
+
     @_locked
     def set_proof_text(self, text):
         """Teks uji project ini (mode Text & Kerning memakainya bersama). Disimpan di meta —
@@ -1795,7 +1814,13 @@ class Project:
             "upm": meta.get("upm", 1000),
             "preset": meta.get("preset"),
             "tracking": int(meta.get("tracking", 0)),  # spasi global (em); berlapis di atas kerning
-            "proofText": meta.get("proofText", ""),   # teks uji bersama mode Text & Kerning
+            # KOSONG (absen maupun "") → bawaan. Sempat saya buat "hanya bila absen" agar
+            # pengosongan yang disengaja dihormati, tapi itu gagal pada kasus nyata: project yang
+            # sudah pernah dibuka menyimpan "" dan karenanya tak pernah melihat bawaannya sama
+            # sekali. Teks uji kosong juga bukan keadaan yang diinginkan siapa pun — mode Text
+            # cuma menampilkan ajakan mengetik. Mengosongkan tetap berlaku SELAMA sesi (kanvas
+            # Kerning kembali ke tampilan dua-glyph); yang tak bertahan hanya sesudah dimuat ulang.
+            "proofText": meta.get("proofText") or self.DEFAULT_PROOF_TEXT,
             # kerapatan pribadi: pengali kekuatan koreksi optik, dipakai Smart + auto-kern + seed
             "kernRatio": self._kern_ratio(meta),
             "kernMode": self._kern_mode(meta),

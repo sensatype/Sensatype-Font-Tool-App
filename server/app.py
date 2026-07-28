@@ -582,6 +582,13 @@ class ProofText(BaseModel):
     text: str = ""
 
 
+@app.get("/api/proof-text/default")
+def proof_text_default():
+    """Teks uji BAWAAN — dipakai UI untuk tombol "pulihkan contoh". Satu sumber kebenaran
+    (project.py), jadi frontend tak menyimpan salinannya sendiri yang bisa tertinggal."""
+    return {"text": project.DEFAULT_PROOF_TEXT}
+
+
 @app.put("/api/proof-text")
 def proof_text(body: ProofText):
     """Teks uji project (dipakai bersama mode Text & Kerning). Tanpa batas panjang."""
