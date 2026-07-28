@@ -1587,6 +1587,16 @@ class Project:
         self._save_meta(meta)
         return self.state()
 
+    @_locked
+    def set_proof_text(self, text):
+        """Teks uji project ini (mode Text & Kerning memakainya bersama). Disimpan di meta —
+        khas per font (pangram bahasa tertentu, kata yang bermasalah di font itu), jadi tak
+        pantas jadi setelan perangkat. TIDAK dibatasi panjangnya; disimpan apa adanya."""
+        meta = self._meta()
+        meta["proofText"] = str(text or "")
+        self._save_meta(meta)
+        return {"proofText": meta["proofText"]}
+
     def _tracked_ufo(self, src, tracking):
         """Salinan UFO dengan tracking di-tambahkan ke advance tiap glyph (untuk export). src tak diubah."""
         if not tracking:
@@ -1785,6 +1795,7 @@ class Project:
             "upm": meta.get("upm", 1000),
             "preset": meta.get("preset"),
             "tracking": int(meta.get("tracking", 0)),  # spasi global (em); berlapis di atas kerning
+            "proofText": meta.get("proofText", ""),   # teks uji bersama mode Text & Kerning
             # kerapatan pribadi: pengali kekuatan koreksi optik, dipakai Smart + auto-kern + seed
             "kernRatio": self._kern_ratio(meta),
             "kernMode": self._kern_mode(meta),

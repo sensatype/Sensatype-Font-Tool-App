@@ -146,6 +146,7 @@ export interface ProjectState {
   upm?: number;
   preset?: string;
   tracking?: number; // spasi global (em), berlapis di atas kerning
+  proofText?: string;   // teks uji bersama mode Text & Kerning (tersimpan per project)
   kernRatio?: number;   // kerapatan pribadi (pengali koreksi optik); 1 = netral
   kernMode?: KernMode;  // mode kerapatan terakhir — dipakai seed Re-seed agar konsisten
   metadata?: Record<string, string>;

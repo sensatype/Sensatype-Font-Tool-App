@@ -578,6 +578,16 @@ class Tracking(BaseModel):
     value: float
 
 
+class ProofText(BaseModel):
+    text: str = ""
+
+
+@app.put("/api/proof-text")
+def proof_text(body: ProofText):
+    """Teks uji project (dipakai bersama mode Text & Kerning). Tanpa batas panjang."""
+    return project.set_proof_text(body.text)
+
+
 @app.put("/api/tracking")
 def tracking(body: Tracking):
     return project.set_tracking(body.value)

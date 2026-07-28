@@ -105,6 +105,12 @@ export function App() {
     api.setTracking(v).catch(() => {});
   }, []);
 
+  // teks uji project — disimpan backend oleh editor (debounce); di sini cukup disegarkan supaya
+  // remount editor (tiap ganti glyph) tak memulihkan nilai lama.
+  const onProofText = useCallback((t: string) => {
+    setProject((p) => (p ? { ...p, proofText: t } : p));
+  }, []);
+
   // peta karakter → nama glyph (untuk mode Text: ketik/tempel teks)
   const charToName = useMemo(() => {
     const m: Record<string, string> = {};
@@ -219,6 +225,8 @@ export function App() {
             fontV={editV}
             tracking={project.tracking ?? 0}
             kernRatio={project.kernRatio ?? 1}
+            proofTextInit={project.proofText ?? ""}
+            onProofText={onProofText}
             onTracking={onTracking}
             onKern={bumpKern}
             onChanged={(g) => {

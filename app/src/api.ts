@@ -212,6 +212,13 @@ export const api = {
 
   glyphsRender: () => fetch(`${BASE}/glyphs/render`).then(j<{ glyphs: Record<string, GlyphRender> }>),
 
+  // Teks uji project (dipakai bersama mode Text & Kerning). Tanpa batas panjang.
+  setProofText: (text: string) =>
+    fetch(`${BASE}/proof-text`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }).then(j<{ proofText: string }>),
+
   setTracking: (value: number) =>
     fetch(`${BASE}/tracking`, {
       method: "PUT",

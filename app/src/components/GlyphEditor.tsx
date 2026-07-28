@@ -54,6 +54,8 @@ export function GlyphEditor({
   fontV = 0,
   tracking = 0,
   kernRatio = 1,
+  proofTextInit = "",
+  onProofText,
   onTracking,
   onKern,
   onChanged,
@@ -65,6 +67,8 @@ export function GlyphEditor({
   fontV?: number; // versi font (bump saat ada commit) → sinkron kern dgn panel samping
   tracking?: number; // spasi global (em)
   kernRatio?: number; // kerapatan pribadi tersimpan (1 = netral) — ditampilkan di samping mode
+  proofTextInit?: string; // teks uji tersimpan di project → nilai awal mode Text & Kerning
+  onProofText?: (t: string) => void; // teks berubah → App menyegarkan project.proofText
   onTracking?: (v: number) => void;
   onKern?: () => void; // sinkron kern: bump editV (editor+panel refetch getKerning) + jadwalkan recompile webfont
   onChanged: (g: Glyph) => void;
@@ -192,7 +196,24 @@ export function GlyphEditor({
   const [partnerData, setPartnerData] = useState<{ path: string; advance: number } | null>(null);
   const [selfData, setSelfData] = useState<{ path: string; advance: number } | null>(null); // data glyph aktif pasangan bila ≠ glyph terpilih
   // TEXT mode: proofing teks bebas
-  const [proofText, setProofText] = useState("");
+  // TEKS UJI, dipakai bersama mode Text & Kerning dan tersimpan di project.
+  // Komponen ini di-remount tiap ganti glyph (key={nama}), jadi state biasa akan hilang setiap
+  // kali pengguna klik huruf lain — persis nasib mode sebelum ditolong lastModeRef. Nilai awal
+  // datang dari project, dan tiap perubahan disimpan balik (debounce) supaya bertahan antar-sesi.
+  const [proofText, setProofText] = useState(proofTextInit);
+  const proofSaveT = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (proofText === proofTextInit) return;          // belum berubah dari yang tersimpan
+    clearTimeout(proofSaveT.current);
+    proofSaveT.current = window.setTimeout(() => {
+      // Kabari App juga: nilai awal komponen ini datang dari project.proofText, dan komponen
+      // di-remount tiap ganti glyph. Tanpa ini App memegang nilai LAMA, lalu remount berikutnya
+      // memulihkannya — teks yang baru diketik hilang begitu pengguna klik huruf lain.
+      onProofText?.(proofText);
+      api.setProofText(proofText).catch(() => { /* gagal simpan → teks tetap hidup di sesi ini */ });
+    }, 600);
+    return () => clearTimeout(proofSaveT.current);
+  }, [proofText, proofTextInit, onProofText]);
   const [proofSize, setProofSize] = useState(96);
   const [proofKern, setProofKern] = useState(true);
   // mode Text: X-Ray (outline/rangka), node/handle, dan atur-kerning (seret glyph) — persist di localStorage
@@ -310,8 +331,12 @@ export function GlyphEditor({
     return () => { cancel = true; };
   }, [kernSelfName, name, glyphNames]);
   // nama kiri/kanan pasangan (tergantung sisi glyph aktif)
-  const kernLeft = kernSide === "left" ? kernSelfName : kernPartnerName;
-  const kernRight = kernSide === "left" ? kernPartnerName : kernSelfName;
+  // Pasangan dari KLIK di teks. Model lama selalu "glyph yang dibuka + Partner", jadi pasangan
+  // seperti B·S (tak satu pun glyph aktif) mustahil diungkapkan. Override ini membukanya tanpa
+  // memaksa pindah glyph — mengganti glyph aktif akan me-remount editor & membuang konteks.
+  const [pickedPair, setPickedPair] = useState<{ l: string; r: string } | null>(null);
+  const kernLeft = pickedPair ? pickedPair.l : (kernSide === "left" ? kernSelfName : kernPartnerName);
+  const kernRight = pickedPair ? pickedPair.r : (kernSide === "left" ? kernPartnerName : kernSelfName);
   // Nilai kern tersimpan utk pasangan ini. Exception pasangan (bila ada, mis. warisan versi lama)
   // menang atas nilai kelas — sama spt urutan resolusi UFO §9.6, supaya angka di layar = yang dipakai.
   const kernScoped = (k: KernInfo | null) => !k ? 0 : (k.pairValue ?? k.classValue ?? 0);
@@ -672,8 +697,11 @@ export function GlyphEditor({
   useEffect(() => {
     if (selfGlyphBump.current) { selfGlyphBump.current = false; proofLoadedV.current = fontV; }
   }, [fontV]);
+  // Mode KERNING kini juga menggambar teks uji → cache render glyph harus ikut termuat di sana,
+  // kalau tidak kanvasnya kosong. Hanya bila ada teksnya (kerning tanpa teks = kanvas pasangan).
+  const proofNeeded = mode === "text" || (mode === "kerning" && !!proofText.trim());
   useEffect(() => {
-    if (mode !== "text") return;
+    if (!proofNeeded) return;
     if (proofLoadedV.current === fontV && Object.keys(glyphCache.current).length) return;
     let cancel = false; setProofLoading(true);
     api.glyphsRender().then((r) => {
@@ -685,10 +713,10 @@ export function GlyphEditor({
       setProofLoading(false); setProofTick((t) => t + 1);
     }).catch(() => { if (!cancel) setProofLoading(false); });
     return () => { cancel = true; };
-  }, [mode, fontV]);
+  }, [proofNeeded, fontV]);
   // TEXT: resolve KERN pasangan yg terlihat (glyph sudah dimuat; kern menyusul, ringan, debounce kecil)
   useEffect(() => {
-    if (mode !== "text" || !proofKern || !proofText.trim()) return;
+    if (!proofNeeded || !proofKern || !proofText.trim()) return;
     const fontChanged = kernVerRef.current !== fontV;
     const timer = setTimeout(async () => {
       kernVerRef.current = fontV; // konsumsi DI DALAM timer — kalau di badan efek, debounce yang dibatalkan (ketikan beruntun <120ms) menelan sinyal & pasangan terlihat tak pernah disegarkan
@@ -712,7 +740,7 @@ export function GlyphEditor({
       setProofTick((t) => t + 1);
     }, 120);
     return () => clearTimeout(timer);
-  }, [mode, proofText, charToName, proofKern, fontV]);
+  }, [proofNeeded, proofText, charToName, proofKern, fontV]);
 
   function snapOf(m: GlyphDetail, c: ContourPoint[][], l: number, r: number): Snap {
     return { contours: c, lsb: l, rsb: r, ascender: m.ascender, descender: m.descender, capHeight: m.capHeight, xHeight: m.xHeight, components: m.components ?? [] };
@@ -1568,7 +1596,19 @@ export function GlyphEditor({
               </>
             )}
           </div>
-          {mode === "kerning" ? (
+          {mode === "kerning" && proofText.trim() ? (
+            // Teks uji yang sama dgn mode Text. Klik sambungan antar-huruf → pasangan itu masuk ke
+            // kolom Kern/Smart di bawah. Tanpa teks, jatuh ke kanvas dua-glyph seperti sebelumnya.
+            <TextProof text={proofText} charToName={charToName} glyphs={glyphCache.current} kerns={kernCache.current}
+              kernOn={proofKern} upm={d.upm} ascender={d.ascender} descender={d.descender} capHeight={d.capHeight}
+              fontSize={proofSize} loading={proofLoading} tracking={tracking}
+              onTextChange={setProofText} bg={cv.bg}
+              showGuides={proofGuides} guideCol={cv.gMajor}
+              showGrid={showGrid} gMinor={cv.gMinor} gMajor={cv.gMajor} snapStep={snapStep}
+              pickPair onPickPair={(l, r) => { setPickedPair({ l, r }); setKernDirty(false); }}
+              activePair={kernLeft && kernRight ? { l: kernLeft, r: kernRight } : null}
+              zoom={proofZoom} onZoom={(f) => setProofZoom((z) => zClamp(z * f))} interact={proofBusy} />
+          ) : mode === "kerning" ? (
             <KerningCanvas
               left={kernSide === "left"
                 ? (kernSelfName === name ? { path, comps, advance: d.advance, isCurrent: true } : (selfData ? { path: selfData.path, comps: [], advance: selfData.advance, isCurrent: false } : null))
@@ -1978,15 +2018,33 @@ export function GlyphEditor({
                 title="Glyph aktif pasangan — ketik nama glyph atau satu karakter (mis. A). Tak perlu klik panel kiri." />
             </label>
             <span className="text-sm font-semibold tabular-nums" title="Pasangan (kiri · kanan)">{kernLeft || "?"} · {kernRight || "?"}</span>
+            {/* Pasangan datang dari KLIK di teks → kolom Glyph/Partner di atas tak lagi menentukan.
+                Katakan itu, dan beri jalan kembali. */}
+            {pickedPair && (
+              <button className="text-[11px] px-2 py-1 rounded-md shrink-0 flex items-center gap-1"
+                style={{ background: "color-mix(in srgb, var(--accent) 18%, transparent)", color: "var(--accent)" }}
+                onClick={() => setPickedPair(null)}
+                title="Pasangan ini dipilih dari teks di kanvas. Klik untuk kembali memakai Glyph + Partner.">
+                dari teks <X className="size-3" />
+              </button>
+            )}
             <button className="btn !py-1.5" onClick={() => setKernSide((s) => (s === "left" ? "right" : "left"))} title="Tukar: glyph aktif di kiri/kanan pasangan">
               <ArrowsLeftRight className="size-4" />{kernSide === "left" ? "aktif di kiri" : "aktif di kanan"}
             </button>
             <label className="flex items-center gap-1">
               <span className="label">Partner</span>
               <input list="ge-glyphnames-k" className="field !w-20 !py-1.5 text-sm" value={kernPartner}
-                onChange={(e) => setKernPartner(e.target.value)} placeholder="glyph" title="Glyph pasangan kerning — nama glyph atau satu karakter" />
+                onChange={(e) => { setKernPartner(e.target.value); setPickedPair(null); }}
+                placeholder="glyph" title="Glyph pasangan kerning — nama glyph atau satu karakter" />
               <GlyphNameList id="ge-glyphnames-k" names={glyphNames} />
             </label>
+            {/* Teks uji BERSAMA dgn mode Text (tersimpan di project). Diisi → kanvas menampilkan
+                teksnya dan sambungan antar-huruf bisa diklik; dikosongkan → kembali ke kanvas
+                dua-glyph. Tanpa batas panjang. */}
+            <input className="field !py-1.5 !w-44 text-sm" value={proofText}
+              onChange={(e) => setProofText(e.target.value)}
+              placeholder="teks uji (bersama mode Text)"
+              title="Teks yang sama dengan mode Text, tersimpan di project. Isi → kanvas menampilkan teksnya, klik di antara dua huruf untuk memilih pasangan. Kosongkan → kembali ke kanvas dua-glyph." />
             {/* satu field: "Spasi global"→tracking seluruh font · "Smart"→kern pasangan terpilih.
                 Nilai DITAHAN dulu (amber = belum ditetapkan) → tulis saat "Terapkan". */}
             {kernScope === "all"
@@ -2504,6 +2562,7 @@ function KerningCanvas({ left, right, kern, tracking = 0, editValue, onEdit, onC
 function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, descender, capHeight = 0, fontSize, loading, tracking = 0, onTextChange, bg = "#fff",
   xray = false, showNodes = false, kernEdit = false, onKernLive, onKernCommit,
   showGuides = false, guideCol = "#b9c2d0",
+  pickPair = false, onPickPair, activePair = null,
   showGrid = false, gMinor = "#dde2eb", gMajor = "#b9c2d0", snapStep = 10, onOutlineLive, onOutlineCommit,
   zoom = 1, onZoom, interact }: {
   text: string; charToName: Record<string, string>;
@@ -2511,6 +2570,11 @@ function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, des
   kerns: Record<string, number>; kernOn: boolean; upm: number; ascender: number; descender: number;
   capHeight?: number;                                    // tinggi kapital SEBENARNYA (bukan taksiran)
   showGuides?: boolean; guideCol?: string;               // garis baseline & cap height
+  // Mode PILIH-PASANGAN (kanvas Kerning): klik sambungan antar-huruf → pasangan itu masuk ke
+  // kolom Kern/Smart. Beda dgn kernEdit yang menyeret glyph untuk mengubah nilainya langsung.
+  pickPair?: boolean;
+  onPickPair?: (left: string, right: string) => void;
+  activePair?: { l: string; r: string } | null;
   fontSize: number; loading: boolean; tracking?: number;
   onTextChange: (t: string) => void;
   bg?: string; // latar kanvas (ikut palet terang/gelap)
@@ -2778,7 +2842,7 @@ function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, des
         {/* NILAI KERN tiap sambungan — angka yang benar-benar diseret, bukan taksiran. Ikut hidup
             saat digeser karena proofKernLive menulis ke cache lalu memicu render ulang.
             Ukuran & jarak dinyatakan dlm unit yang diturunkan dari fs → konstan di layar. */}
-        {kernEdit && (() => {
+        {(kernEdit || pickPair) && (() => {
           const tsz = (11 * upm) / fs;        // 11 px
           const tick = (4 * upm) / fs;        // garis penanda sambungan
           const sw = (0.9 * upm) / fs;
@@ -2792,7 +2856,8 @@ function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, des
             const v = kerns[`${c.prevName} ${c.name}`] ?? 0;
             const seam = (p.x + p.advance + c.x) / 2;   // titik temu: tepi kanan kiri ↔ tepi kiri kanan
             const yTop = ln.baseline - descender;       // descender negatif → ini garis paling bawah
-            const active = !!drag && drag.l === c.prevName && drag.r === c.name;
+            const active = (!!drag && drag.l === c.prevName && drag.r === c.name)
+              || (!!activePair && activePair.l === c.prevName && activePair.r === c.name);
             const col = active ? "var(--accent)" : v ? "var(--good)" : "var(--faint)";
             return (
               <g key={`kv${li}-${ci}`} style={{ pointerEvents: "none", userSelect: "none" }}>
@@ -2806,6 +2871,23 @@ function TextProof({ text, charToName, glyphs, kerns, kernOn, upm, ascender, des
             );
           }));
         })()}
+        {/* PILIH PASANGAN: pita klik selebar 0,25 em di tiap sambungan. Ditaruh SESUDAH glyph
+            supaya klik selalu sampai, dan lebarnya tetap dlm unit → konstan di layar. */}
+        {pickPair && rendered.map((ln, li) => ln.cells.map((c, ci) => {
+          if (!c.name || !c.prevName) return null;
+          const p = ln.cells[ci - 1];
+          if (!p) return null;
+          const seam = (p.x + p.advance + c.x) / 2;
+          const w = upm * 0.25;
+          const on = !!activePair && activePair.l === c.prevName && activePair.r === c.name;
+          return (
+            <rect key={`pp${li}-${ci}`} x={seam - w / 2} y={ln.baseline - ascender}
+              width={w} height={ascender - descender}
+              fill={on ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "transparent"}
+              style={{ cursor: "pointer" }}
+              onPointerDown={(e) => { e.stopPropagation(); onPickPair?.(c.prevName!, c.name!); }} />
+          );
+        }))}
         {/* kursor teks (kedip) saat kanvas fokus */}
         {focused && <line x1={caretX} y1={caretBase - ascender} x2={caretX} y2={caretBase - descender}
           stroke="var(--accent)" strokeWidth={upm * 0.016} className="animate-pulse" />}
